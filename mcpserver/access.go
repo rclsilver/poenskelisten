@@ -27,6 +27,14 @@ var errNoAccess = errors.New("wishlist not found or not accessible")
 // collaborator, then group member), or errNoAccess. Any single place that
 // reads a wishlist for the MCP must go through here.
 func resolveRole(userID, wishlistID uuid.UUID) (role, error) {
+	// Collaboration and group rows survive the deletion of a wishlist, so a
+	// disabled one has to be ruled out before looking at them.
+	if _, err := database.GetWishlist(wishlistID); errors.Is(err, database.ErrWishlistNotFound) {
+		return "", errNoAccess
+	} else if err != nil {
+		return "", fmt.Errorf("failed to load wishlist: %w", err)
+	}
+
 	owns, err := database.VerifyUserOwnershipToWishlist(userID, wishlistID)
 	if err != nil {
 		return "", fmt.Errorf("failed to verify ownership: %w", err)

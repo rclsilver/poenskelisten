@@ -207,9 +207,13 @@ Enable it with `mcp_enabled: true` (it's off by default). The endpoint lives at
 (`/oauth/register`), and runs the browser login + consent flow — no manual client
 setup. Set `external_url` to the public HTTPS address the client connects to, since the OAuth issuer and the MCP resource identifier are derived from it.
 
-Current tools are **read-only**: `list_wishlists` (yours, ones you collaborate on and ones shared with you through groups, each with its owner and your role), `list_wishes` (same access rules as the web app; whether a wish is claimed is shown to group members only, and never to the list owner or collaborators), `get_public_wishlist` (by `public_hash`) and `list_groups`
+Read tools: `list_wishlists` (yours, ones you collaborate on and ones shared with you through groups, each with its owner and your role), `list_wishes` (same access rules as the web app; whether a wish is claimed is shown to group members only, and never to the list owner or collaborators), `get_public_wishlist` (by `public_hash`) and `list_groups`
 (gated by the `mcp:wishlists.read` / `mcp:groups.read` scopes you approve on the
-consent screen). Connected apps only ever get access to the MCP endpoint, never to
+consent screen).
+
+Write tools need the `mcp:wishlists.write` scope, which the consent screen words as "Create, edit and delete your wishlists and wishes", and follow the web app's rules exactly: `create_wishlist` (optionally shared with groups you belong to), `update_wishlist` (owner or collaborator; only the given fields change) and `delete_wishlist` (owner only). Deleting only disables the wishlist, like the web app, and never touches image files. Callers without access get the same "not found or not accessible" error as for a wishlist that doesn't exist.
+
+Connected apps only ever get access to the MCP endpoint, never to
 the rest of Pønskelisten's API, and app registration is switched off along with MCP. Users can disconnect an app under "Connected apps" on their account page, and admins can revoke any registered client from the admin panel.
 
 ## 🐳 Docker Setup

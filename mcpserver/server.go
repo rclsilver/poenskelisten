@@ -141,6 +141,8 @@ func buildServer() *mcp.Server {
 		Description: "List the groups you are a member of.",
 	}, listGroups)
 
+	registerWishlistWriteTools(server)
+
 	return server
 }
 
