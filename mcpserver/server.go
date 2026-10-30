@@ -146,6 +146,7 @@ func buildServer() *mcp.Server {
 	}, listGroups)
 
 	registerWishlistWriteTools(server)
+	registerWishWriteTools(server)
 
 	return server
 }
