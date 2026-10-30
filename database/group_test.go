@@ -283,6 +283,50 @@ func TestGroupToWishlistMembership(t *testing.T) {
 	}
 }
 
+func TestGetGroupsFromWishlist(t *testing.T) {
+	setupTestDB(t)
+
+	owner := createTestUser(t)
+	other := createTestUser(t)
+	wishlist := createTestWishlist(t, owner.ID)
+
+	// The owner is in this one.
+	joined := createTestGroup(t, owner.ID)
+	addGroupMember(t, joined.ID, owner.ID)
+	addWishlistMembership(t, wishlist.ID, joined.ID)
+	// The owner left (or never joined) this one; the share still stands.
+	left := createTestGroup(t, other.ID)
+	addWishlistMembership(t, wishlist.ID, left.ID)
+	// Neither a deleted group nor a withdrawn share counts.
+	deleted := createTestGroup(t, owner.ID)
+	addWishlistMembership(t, wishlist.ID, deleted.ID)
+	if err := DeleteGroup(deleted.ID); err != nil {
+		t.Fatalf("DeleteGroup returned error: %v", err)
+	}
+	withdrawn := createTestGroup(t, owner.ID)
+	membership := addWishlistMembership(t, wishlist.ID, withdrawn.ID)
+	if err := DeleteWishlistMembership(membership.ID); err != nil {
+		t.Fatalf("DeleteWishlistMembership returned error: %v", err)
+	}
+
+	groups, err := GetGroupsFromWishlist(wishlist.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := map[uuid.UUID]bool{}
+	for _, g := range groups {
+		got[g.ID] = true
+	}
+	if len(groups) != 2 || !got[joined.ID] || !got[left.ID] {
+		t.Fatalf("groups = %+v, want exactly the joined and left groups", groups)
+	}
+
+	none, err := GetGroupsFromWishlist(uuid.New())
+	if err != nil || none == nil || len(none) != 0 {
+		t.Fatalf("unknown wishlist = (%v, %v), want an empty non-nil slice", none, err)
+	}
+}
+
 func TestCreateGroupInDBFailure(t *testing.T) {
 	setupTestDB(t)
 	owner := createTestUser(t)
@@ -331,6 +375,10 @@ func TestGroupQueriesFailOnClosedDB(t *testing.T) {
 		},
 		"GetGroupMembersFromWishlist": func() error {
 			_, err := GetGroupMembersFromWishlist(uuid.New(), uuid.New())
+			return err
+		},
+		"GetGroupsFromWishlist": func() error {
+			_, err := GetGroupsFromWishlist(uuid.New())
 			return err
 		},
 		"GetGroupsAUserIsAMemberOf": func() error {

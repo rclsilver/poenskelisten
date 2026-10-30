@@ -145,12 +145,12 @@ func TestWriteToolsAreAnnotated(t *testing.T) {
 			destructive[tool.Name] = *tool.Annotations.DestructiveHint
 		}
 	}
-	for _, name := range []string{"delete_wishlist", "delete_wish"} {
+	for _, name := range []string{"delete_wishlist", "delete_wish", "detach_wishlist_from_group"} {
 		if !destructive[name] {
 			t.Errorf("%s must carry destructiveHint=true", name)
 		}
 	}
-	for _, name := range []string{"create_wishlist", "create_wish"} {
+	for _, name := range []string{"create_wishlist", "create_wish", "attach_wishlist_to_group"} {
 		if v, ok := destructive[name]; !ok || v {
 			t.Errorf("%s must carry destructiveHint=false", name)
 		}

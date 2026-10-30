@@ -115,6 +115,31 @@ func GetGroupMembersFromWishlist(wishlistID uuid.UUID, wishlistOwnerID uuid.UUID
 	return groups, nil
 }
 
+// GetGroupsFromWishlist returns every enabled group a wishlist is shared with.
+// Unlike GetGroupMembersFromWishlist it doesn't require the owner to be in
+// the group: leaving a group keeps one's wishlists shared with it, so the
+// owner needs to see such shares to withdraw them.
+func GetGroupsFromWishlist(wishlistID uuid.UUID) ([]models.Group, error) {
+	var groups []models.Group
+
+	groupsRecords := Instance.
+		Where(&models.Group{Enabled: true}).
+		Joins("JOIN wishlist_memberships ON groups.id = wishlist_memberships.group_id").
+		Where("wishlist_memberships.enabled = ? AND wishlist_memberships.wishlist_id = ?", true, wishlistID).
+		Group("groups.id").
+		Find(&groups)
+
+	if groupsRecords.Error != nil {
+		return []models.Group{}, groupsRecords.Error
+	}
+
+	if len(groups) == 0 {
+		groups = []models.Group{}
+	}
+
+	return groups, nil
+}
+
 func GetGroupsAUserIsAMemberOf(UserID uuid.UUID) ([]models.Group, error) {
 	var groups []models.Group
 
