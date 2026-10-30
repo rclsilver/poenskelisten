@@ -41,7 +41,7 @@ func isUserError(err error) bool {
 	var ue userError
 	return errors.As(err, &ue) ||
 		errors.Is(err, errNoAccess) || errors.Is(err, errNotOwner) || errors.Is(err, errNotEditor) ||
-		errors.Is(err, errNoGroup)
+		errors.Is(err, errNoGroup) || errors.Is(err, errNoUser)
 }
 
 // writableWishlist loads a live wishlist the caller may edit. needOwner
