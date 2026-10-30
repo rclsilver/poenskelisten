@@ -213,6 +213,8 @@ consent screen).
 
 Write tools need the `mcp:wishlists.write` scope, which the consent screen words as "Create, edit and delete your wishlists and wishes", and follow the web app's rules exactly: `create_wishlist` (optionally shared with groups you belong to), `update_wishlist` (owner or collaborator; only the given fields change) and `delete_wishlist` (owner only). Deleting only disables the wishlist, like the web app, and never touches image files. Callers without access get the same "not found or not accessible" error as for a wishlist that doesn't exist.
 
+Wishes: `create_wish`, `update_wish` and `delete_wish` work for the owner or a collaborator of the wishlist (not for group members, nor the wish's author alone, as on the web); deleting a wish disables it, keeps its image and does not e-mail whoever claimed it. Images cannot be set through MCP.
+
 Connected apps only ever get access to the MCP endpoint, never to
 the rest of Pønskelisten's API, and app registration is switched off along with MCP. Users can disconnect an app under "Connected apps" on their account page, and admins can revoke any registered client from the admin panel.
 

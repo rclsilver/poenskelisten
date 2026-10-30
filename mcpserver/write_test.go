@@ -113,6 +113,9 @@ func TestWriteToolsRequireWriteScope(t *testing.T) {
 		"create_wishlist": {"name": "Brand new"},
 		"update_wishlist": {"wishlist_id": wishlist.ID.String(), "name": "Renamed list"},
 		"delete_wishlist": {"wishlist_id": wishlist.ID.String()},
+		"create_wish":     {"wishlist_id": wishlist.ID.String(), "name": "Headphones"},
+		"update_wish":     {"wish_id": uuid.NewString(), "name": "Headphones"},
+		"delete_wish":     {"wish_id": uuid.NewString()},
 	}
 	for name, args := range calls {
 		result := callWriteTool(t, owner.ID, "mcp:wishlists.read", name, args)
@@ -142,12 +145,12 @@ func TestWriteToolsAreAnnotated(t *testing.T) {
 			destructive[tool.Name] = *tool.Annotations.DestructiveHint
 		}
 	}
-	for _, name := range []string{"delete_wishlist"} {
+	for _, name := range []string{"delete_wishlist", "delete_wish"} {
 		if !destructive[name] {
 			t.Errorf("%s must carry destructiveHint=true", name)
 		}
 	}
-	for _, name := range []string{"create_wishlist"} {
+	for _, name := range []string{"create_wishlist", "create_wish"} {
 		if v, ok := destructive[name]; !ok || v {
 			t.Errorf("%s must carry destructiveHint=false", name)
 		}
