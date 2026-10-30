@@ -147,6 +147,7 @@ func buildServer() *mcp.Server {
 
 	registerWishlistWriteTools(server)
 	registerWishWriteTools(server)
+	registerClaimTools(server)
 
 	return server
 }

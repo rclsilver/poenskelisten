@@ -24,7 +24,7 @@ var Registry = []Scope{
 	{Name: "mcp:wishlists.read", Description: "Read your wishlists and wishes", MCP: true},
 	{Name: "mcp:wishlists.write", Description: "Create, edit and delete your wishlists and wishes", MCP: true},
 	{Name: "mcp:groups.read", Description: "Read the groups you belong to", MCP: true},
-	{Name: "mcp:wishes.claim", Description: "Claim wishes on your behalf", MCP: true},
+	{Name: "mcp:wishes.claim", Description: "Claim wishes, and cancel your claims, on your behalf", MCP: true},
 }
 
 // byName indexes the registry for quick lookups.
