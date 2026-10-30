@@ -610,7 +610,7 @@ the only toggle (it gates 4.3).
 > `/.well-known/oauth-protected-resource`. Self-gates on `MCPEnabled` (404 when
 > off). Tools: `list_wishlists`, `list_wishes(wishlist_id)`, `list_groups`, each
 > enforcing its `mcp:*` scope from the token and acting as the token's `sub` user
-> (owned wishlists only for now). Unit-tested (verifier audience/validity, scope
+> (owned wishlists only at first; later widened to shared/collaborated lists and public lists by hash). Unit-tested (verifier audience/validity, scope
 > helper). Browser/live check with a real MCP client still pending.
 
 - **Bearer middleware:** the **same OAuth access-token validator built in 4.1(b)**,

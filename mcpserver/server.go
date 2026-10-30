@@ -8,6 +8,7 @@ package mcpserver
 import (
 	pauth "aunefyren/poenskelisten/auth"
 	"aunefyren/poenskelisten/config"
+	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
 	"context"
 	"encoding/json"
@@ -34,12 +35,18 @@ type listWishesArgs struct {
 	WishlistID string `json:"wishlist_id" jsonschema:"the ID of the wishlist whose wishes to list"`
 }
 
+type publicWishlistArgs struct {
+	PublicHash string `json:"public_hash" jsonschema:"the public hash from a shared public wishlist link"`
+}
+
 // Output shapes — deliberately trimmed so internal fields never reach the client.
 type wishlistOut struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Date        string `json:"date,omitempty"`
+	Owner       string `json:"owner,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 type wishOut struct {
@@ -48,6 +55,18 @@ type wishOut struct {
 	Note  string   `json:"note,omitempty"`
 	URL   string   `json:"url,omitempty"`
 	Price *float64 `json:"price,omitempty"`
+	// Claimed and ClaimedBy are omitted when the caller isn't allowed to know
+	// (owner, collaborators); Claimed=false then really means "unclaimed".
+	Claimed   *bool  `json:"claimed,omitempty"`
+	ClaimedBy string `json:"claimed_by,omitempty"`
+}
+
+type publicWishlistOut struct {
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Date        string    `json:"date,omitempty"`
+	Owner       string    `json:"owner,omitempty"`
+	Wishes      []wishOut `json:"wishes"`
 }
 
 type groupOut struct {
@@ -104,13 +123,18 @@ func buildServer() *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_wishlists",
-		Description: "List the wishlists you own, with their id, name, description and date.",
+		Description: "List the wishlists you can see: yours, ones you collaborate on and ones shared with you through your groups. Each has an id, name, description, date, owner and your role (owner, collaborator or group_member).",
 	}, listWishlists)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_wishes",
-		Description: "List the wishes on one of your wishlists. Provide the wishlist_id (from list_wishlists).",
+		Description: "List the wishes on a wishlist you can see. Provide the wishlist_id (from list_wishlists). For group members, each wish says whether it is already claimed (and by whom, unless the list hides claimers); owners and collaborators never see claims.",
 	}, listWishes)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_public_wishlist",
+		Description: "Read a public wishlist from its public_hash (the UUID in a shared public link). Read-only.",
+	}, getPublicWishlist)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_groups",
@@ -126,16 +150,27 @@ func listWishlists(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.
 		return nil, nil, err
 	}
 
-	wishlists, err := database.GetOwnedWishlists(userID)
+	wishlists, err := accessibleWishlists(userID)
 	if err != nil {
 		return nil, nil, errors.New("failed to load wishlists")
 	}
 
 	out := make([]wishlistOut, 0, len(wishlists))
-	for _, w := range wishlists {
-		item := wishlistOut{ID: w.ID.String(), Name: w.Name, Description: w.Description}
-		if w.Date != nil {
-			item.Date = w.Date.Format("2006-01-02")
+	for _, rw := range wishlists {
+		owner, err := database.GetUserInformation(rw.wishlist.OwnerID)
+		if err != nil {
+			// The owner is gone or disabled; the web app skips such lists too.
+			continue
+		}
+		item := wishlistOut{
+			ID:          rw.wishlist.ID.String(),
+			Name:        rw.wishlist.Name,
+			Description: rw.wishlist.Description,
+			Owner:       displayName(owner.FirstName, owner.LastName),
+			Role:        string(rw.role),
+		}
+		if rw.wishlist.Date != nil {
+			item.Date = rw.wishlist.Date.Format("2006-01-02")
 		}
 		out = append(out, item)
 	}
@@ -153,21 +188,108 @@ func listWishes(ctx context.Context, _ *mcp.CallToolRequest, args listWishesArgs
 		return nil, nil, errors.New("invalid wishlist_id")
 	}
 
-	owns, err := database.VerifyUserOwnershipToWishlist(userID, wishlistID)
-	if err != nil || !owns {
-		return nil, nil, errors.New("wishlist not found or not accessible")
+	r, err := resolveRole(userID, wishlistID)
+	if err != nil {
+		return nil, nil, publicAccessError(err)
 	}
 
-	_, wishes, err := database.GetWishesFromWishlist(wishlistID)
+	out, err := wishesOf(wishlistID, userID, r)
+	if err != nil {
+		return nil, nil, errors.New("failed to load wishes")
+	}
+	return jsonResult(out), nil, nil
+}
+
+func getPublicWishlist(ctx context.Context, _ *mcp.CallToolRequest, args publicWishlistArgs) (*mcp.CallToolResult, any, error) {
+	userID, err := requireScope(ctx, scopeWishlistsRead)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	hash, err := uuid.Parse(strings.TrimSpace(args.PublicHash))
+	if err != nil {
+		return nil, nil, errors.New("invalid public_hash")
+	}
+
+	found, wishlist, err := database.GetPublicWishListByWishlistHash(hash)
+	if err != nil {
+		return nil, nil, errors.New("failed to load wishlist")
+	}
+	if !found {
+		return nil, nil, errors.New("public wishlist not found")
+	}
+
+	owner, err := database.GetUserInformation(wishlist.OwnerID)
+	if err != nil {
+		return nil, nil, errors.New("public wishlist not found")
+	}
+
+	// The caller may well be the owner or a collaborator opening their own
+	// public link: they must not see claims there either.
+	r, err := resolveRole(userID, wishlist.ID)
+	if err != nil && !errors.Is(err, errNoAccess) {
+		return nil, nil, errors.New("failed to load wishlist")
+	}
+
+	wishes, err := wishesOf(wishlist.ID, userID, r)
 	if err != nil {
 		return nil, nil, errors.New("failed to load wishes")
 	}
 
-	out := make([]wishOut, 0, len(wishes))
-	for _, w := range wishes {
-		out = append(out, wishOut{ID: w.ID.String(), Name: w.Name, Note: w.Note, URL: w.URL, Price: w.Price})
+	out := publicWishlistOut{
+		Name:        wishlist.Name,
+		Description: wishlist.Description,
+		Owner:       displayName(owner.FirstName, owner.LastName),
+		Wishes:      wishes,
+	}
+	if wishlist.Date != nil {
+		out.Date = wishlist.Date.Format("2006-01-02")
 	}
 	return jsonResult(out), nil, nil
+}
+
+// wishesOf loads a wishlist's wishes through the web app's own conversion, so
+// claim visibility and hide_claimers anonymisation follow exactly the rules of
+// controllers.ConvertWishToWishObject. The caller must already have been
+// authorised on the wishlist; r is their role on it ("" for a stranger reading
+// a public list).
+func wishesOf(wishlistID, userID uuid.UUID, r role) ([]wishOut, error) {
+	_, wishes, err := database.GetWishesFromWishlist(wishlistID)
+	if err != nil {
+		return nil, err
+	}
+
+	objects, err := controllers.ConvertWishesToWishObjects(wishes, &userID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]wishOut, 0, len(objects))
+	for _, w := range objects {
+		item := wishOut{ID: w.ID.String(), Name: w.Name, Note: w.Note, URL: w.URL, Price: w.Price}
+		if claimsVisible(r, w.Owner.ID, userID) {
+			claimed := len(w.WishClaim) > 0
+			item.Claimed = &claimed
+			if claimed {
+				item.ClaimedBy = displayName(w.WishClaim[0].User.FirstName, w.WishClaim[0].User.LastName)
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// publicAccessError keeps "no access" distinguishable from a failed lookup
+// without leaking internals.
+func publicAccessError(err error) error {
+	if errors.Is(err, errNoAccess) {
+		return errNoAccess
+	}
+	return errors.New("failed to verify access")
+}
+
+func displayName(first, last string) string {
+	return strings.TrimSpace(first + " " + last)
 }
 
 func listGroups(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {

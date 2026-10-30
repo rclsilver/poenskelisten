@@ -44,6 +44,7 @@ func setupMCPDB(t *testing.T) {
 	if err := instance.AutoMigrate(
 		&models.User{}, &models.Wishlist{}, &models.Wish{},
 		&models.Group{}, &models.GroupMembership{},
+		&models.WishlistMembership{}, &models.WishlistCollaborator{}, &models.WishClaim{}, &models.WishCategory{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -340,4 +341,197 @@ func TestJSONResultUnmarshalableFallsBackToEmptyArray(t *testing.T) {
 	if firstText(t, result) != "[]" {
 		t.Errorf("text = %q, want []", firstText(t, result))
 	}
+}
+
+// callTool runs a tool and decodes its JSON text result into dst, failing the
+// test on a transport error or a tool error.
+func callTool(t *testing.T, userID uuid.UUID, name string, args map[string]any, dst any) {
+	t.Helper()
+	session := startMCPTestServer(t, userID, "mcp:wishlists.read")
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool call reported an error: %+v", result.Content)
+	}
+	if err := json.Unmarshal([]byte(firstText(t, result)), dst); err != nil {
+		t.Fatalf("failed to parse tool result: %v", err)
+	}
+}
+
+// callToolExpectError runs a tool and fails unless it reports an error; the
+// error text is returned.
+func callToolExpectError(t *testing.T, userID uuid.UUID, name string, args map[string]any) string {
+	t.Helper()
+	session := startMCPTestServer(t, userID, "mcp:wishlists.read")
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatalf("CallTool transport-level error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected an error result, got %s", firstText(t, result))
+	}
+	return firstText(t, result)
+}
+
+func TestListWishlistsToolIncludesSharedAndCollaborated(t *testing.T) {
+	setupMCPDB(t)
+	me := createMCPTestUser(t, "Ada")
+	friend := createMCPTestUser(t, "Bob")
+	stranger := createMCPTestUser(t, "Dan")
+	createMCPWishlist(t, me, "Mine", false)
+	shared := createMCPWishlist(t, friend, "Shared", false)
+	shareMCPWishlist(t, friend, shared, me)
+	collab := createMCPWishlist(t, friend, "Collab", false)
+	createMCPCollaborator(t, me, collab)
+	createMCPWishlist(t, stranger, "Secret", false)
+
+	var got []wishlistOut
+	callTool(t, me.ID, "list_wishlists", nil, &got)
+
+	roles := map[string]wishlistOut{}
+	for _, w := range got {
+		roles[w.Name] = w
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %+v, want exactly Mine, Shared, Collab", got)
+	}
+	if roles["Mine"].Role != "owner" || roles["Shared"].Role != "group_member" || roles["Collab"].Role != "collaborator" {
+		t.Errorf("unexpected roles: %+v", roles)
+	}
+	if roles["Shared"].Owner != "Bob" || roles["Mine"].Owner != "Ada" {
+		t.Errorf("unexpected owners: %+v", roles)
+	}
+}
+
+func TestListWishlistsToolStrangerSeesNothing(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	stranger := createMCPTestUser(t, "Dan")
+	createMCPWishlist(t, owner, "Mine", false)
+
+	var got []wishlistOut
+	callTool(t, stranger.ID, "list_wishlists", nil, &got)
+	if len(got) != 0 {
+		t.Errorf("got %+v, want nothing", got)
+	}
+}
+
+func TestListWishesToolPerRole(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	collab := createMCPTestUser(t, "Bob")
+	member := createMCPTestUser(t, "Cleo")
+	stranger := createMCPTestUser(t, "Dan")
+	wishlist := createMCPWishlist(t, owner, "Birthday", false)
+	createMCPWish(t, owner, wishlist, "Headphones")
+	createMCPCollaborator(t, collab, wishlist)
+	shareMCPWishlist(t, owner, wishlist, member)
+	args := map[string]any{"wishlist_id": wishlist.ID.String()}
+
+	for name, user := range map[string]models.User{"owner": owner, "collaborator": collab, "group member": member} {
+		var got []wishOut
+		callTool(t, user.ID, "list_wishes", args, &got)
+		if len(got) != 1 || got[0].Name != "Headphones" {
+			t.Errorf("%s: got %+v, want the one wish", name, got)
+		}
+	}
+
+	callToolExpectError(t, stranger.ID, "list_wishes", args)
+}
+
+func TestListWishesToolClaims(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	collab := createMCPTestUser(t, "Bob")
+	member := createMCPTestUser(t, "Cleo")
+	claimer := createMCPTestUser(t, "Eve")
+	wishlist := createMCPWishlist(t, owner, "Birthday", false)
+	wish := createMCPWish(t, owner, wishlist, "Headphones")
+	createMCPCollaborator(t, collab, wishlist)
+	shareMCPWishlist(t, owner, wishlist, member, claimer)
+	createMCPClaim(t, claimer, wish)
+	args := map[string]any{"wishlist_id": wishlist.ID.String()}
+
+	// The surprise must survive: no claim information for owner or collaborator.
+	for name, user := range map[string]models.User{"owner": owner, "collaborator": collab} {
+		var got []wishOut
+		callTool(t, user.ID, "list_wishes", args, &got)
+		if len(got) != 1 || got[0].Claimed != nil || got[0].ClaimedBy != "" {
+			t.Errorf("%s: claim leaked: %+v", name, got)
+		}
+	}
+
+	var got []wishOut
+	callTool(t, member.ID, "list_wishes", args, &got)
+	if len(got) != 1 || got[0].Claimed == nil || !*got[0].Claimed || got[0].ClaimedBy != "Eve" {
+		t.Errorf("group member: got %+v, want claimed by Eve", got)
+	}
+}
+
+func TestListWishesToolHideClaimers(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	member := createMCPTestUser(t, "Cleo")
+	claimer := createMCPTestUser(t, "Eve")
+	wishlist := createMCPWishlist(t, owner, "Birthday", true)
+	wish := createMCPWish(t, owner, wishlist, "Headphones")
+	shareMCPWishlist(t, owner, wishlist, member, claimer)
+	createMCPClaim(t, claimer, wish)
+
+	var got []wishOut
+	callTool(t, member.ID, "list_wishes", map[string]any{"wishlist_id": wishlist.ID.String()}, &got)
+	if len(got) != 1 || got[0].Claimed == nil || !*got[0].Claimed {
+		t.Fatalf("got %+v, want a claimed wish", got)
+	}
+	if got[0].ClaimedBy != "Hidden User" {
+		t.Errorf("claimed_by = %q, want the anonymised \"Hidden User\"", got[0].ClaimedBy)
+	}
+}
+
+func TestGetPublicWishlistTool(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	viewer := createMCPTestUser(t, "Dan")
+	claimer := createMCPTestUser(t, "Eve")
+	wishlist := createMCPWishlist(t, owner, "Birthday", false)
+	hash := uuid.New()
+	if r := database.Instance.Model(&wishlist).Updates(map[string]any{"public": true, "public_hash": hash}); r.Error != nil {
+		t.Fatalf("failed to publish wishlist: %v", r.Error)
+	}
+	wish := createMCPWish(t, owner, wishlist, "Headphones")
+	createMCPClaim(t, claimer, wish)
+	args := map[string]any{"public_hash": hash.String()}
+
+	// A stranger reading the public link sees the wish and its claim.
+	var got publicWishlistOut
+	callTool(t, viewer.ID, "get_public_wishlist", args, &got)
+	if got.Name != "Birthday" || got.Owner != "Ada" || len(got.Wishes) != 1 {
+		t.Fatalf("got %+v, want the Birthday list with one wish", got)
+	}
+	if got.Wishes[0].Claimed == nil || !*got.Wishes[0].Claimed {
+		t.Errorf("stranger: got %+v, want the claim visible", got.Wishes[0])
+	}
+
+	// The owner opening their own public link must not see the claim.
+	got = publicWishlistOut{} // json.Unmarshal would keep the stale Claimed pointer
+	callTool(t, owner.ID, "get_public_wishlist", args, &got)
+	if len(got.Wishes) != 1 || got.Wishes[0].Claimed != nil || got.Wishes[0].ClaimedBy != "" {
+		t.Errorf("owner: claim leaked: %+v", got.Wishes)
+	}
+}
+
+func TestGetPublicWishlistToolInvalidAndUnknownHash(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	private := createMCPWishlist(t, owner, "Private", false) // not public
+	privateHash := uuid.New()
+	if r := database.Instance.Model(&private).Update("public_hash", privateHash); r.Error != nil {
+		t.Fatalf("failed to set hash: %v", r.Error)
+	}
+
+	callToolExpectError(t, owner.ID, "get_public_wishlist", map[string]any{"public_hash": "nope"})
+	callToolExpectError(t, owner.ID, "get_public_wishlist", map[string]any{"public_hash": uuid.NewString()})
+	callToolExpectError(t, owner.ID, "get_public_wishlist", map[string]any{"public_hash": privateHash.String()})
 }
