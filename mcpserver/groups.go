@@ -45,7 +45,7 @@ func memberGroup(userID, groupID uuid.UUID) (models.Group, error) {
 func registerGroupTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_group_members",
-		Description: "List the members of a group you belong to (group_id from list_groups), each with an id and a name. Groups you are not in are reported as not found.",
+		Description: "List the members of a group you belong to (group_id from list_groups), each with an id and a name (the id is what add_collaborator takes). Groups you are not in are reported as not found.",
 	}, listGroupMembers)
 }
 
