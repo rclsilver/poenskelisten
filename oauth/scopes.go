@@ -22,7 +22,7 @@ var Registry = []Scope{
 	{Name: "profile", Description: "Read your basic profile (name)"},
 	{Name: "email", Description: "Read your email address"},
 	{Name: "mcp:wishlists.read", Description: "Read your wishlists and wishes", MCP: true},
-	{Name: "mcp:wishlists.write", Description: "Create and edit your wishlists and wishes", MCP: true},
+	{Name: "mcp:wishlists.write", Description: "Create, edit and delete your wishlists and wishes", MCP: true},
 	{Name: "mcp:groups.read", Description: "Read the groups you belong to", MCP: true},
 	{Name: "mcp:wishes.claim", Description: "Claim wishes on your behalf", MCP: true},
 }

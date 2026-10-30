@@ -177,3 +177,22 @@ func TestClaimsVisible(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveRoleDisabledWishlist(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	collab := createMCPTestUser(t, "Bob")
+	member := createMCPTestUser(t, "Cleo")
+	wishlist := createMCPWishlist(t, owner, "Birthday", false)
+	createMCPCollaborator(t, collab, wishlist)
+	shareMCPWishlist(t, owner, wishlist, member)
+	database.Instance.Model(&models.Wishlist{}).Where("id = ?", wishlist.ID).Update("enabled", false)
+
+	// Collaboration and group rows outlive a deleted wishlist; none of them
+	// may keep granting access to it.
+	for _, u := range []models.User{owner, collab, member} {
+		if _, err := resolveRole(u.ID, wishlist.ID); !errors.Is(err, errNoAccess) {
+			t.Errorf("%s: err = %v, want errNoAccess", u.FirstName, err)
+		}
+	}
+}
