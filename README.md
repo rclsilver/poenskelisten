@@ -207,7 +207,7 @@ Enable it with `mcp_enabled: true` (it's off by default). The endpoint lives at
 (`/oauth/register`), and runs the browser login + consent flow — no manual client
 setup. Set `external_url` to the public HTTPS address the client connects to, since the OAuth issuer and the MCP resource identifier are derived from it.
 
-Read tools: `list_wishlists` (yours, ones you collaborate on and ones shared with you through groups, each with its owner and your role), `list_wishes` (same access rules as the web app; whether a wish is claimed is shown to group members only, and never to the list owner or collaborators), `get_public_wishlist` (by `public_hash`) and `list_groups`
+Read tools: `list_wishlists` (yours, ones you collaborate on and ones shared with you through groups, each with its owner and your role), `list_wishes` (same access rules as the web app; whether a wish is claimed is shown to group members only, and never to the list owner or collaborators), `get_public_wishlist` (by `public_hash`), `list_groups` and `list_group_members` (only for groups you belong to; each member is an id and a name, never an e-mail)
 (gated by the `mcp:wishlists.read` / `mcp:groups.read` scopes you approve on the
 consent screen).
 
