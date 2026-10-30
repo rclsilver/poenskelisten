@@ -215,6 +215,8 @@ Write tools need the `mcp:wishlists.write` scope, which the consent screen words
 
 Wishes: `create_wish`, `update_wish` and `delete_wish` work for the owner or a collaborator of the wishlist (not for group members, nor the wish's author alone, as on the web); deleting a wish disables it, keeps its image and does not e-mail whoever claimed it. Images cannot be set through MCP.
 
+Claims need the `mcp:wishes.claim` scope ("Claim wishes, and cancel your claims, on your behalf"): `claim_wish` and `unclaim_wish` take a `wish_id` and return `{id, claimed}`, never who else holds a claim. As on the web, the wishlist must be claimable, you must be a group member of it (not its owner or a collaborator, not the wish's author), a wish has a single claimer and only your own claim can be released. The wishlist owner is not e-mailed. Unclaiming twice reports an error the second time.
+
 Connected apps only ever get access to the MCP endpoint, never to
 the rest of Pønskelisten's API, and app registration is switched off along with MCP. Users can disconnect an app under "Connected apps" on their account page, and admins can revoke any registered client from the admin panel.
 
