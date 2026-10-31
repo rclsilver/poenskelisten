@@ -908,3 +908,30 @@ func TestFrontendTranslationKeysExist(t *testing.T) {
 		t.Fatal("found no translation keys at all; the patterns are out of date")
 	}
 }
+
+// The pages take the application name from the server's configuration. It is
+// free text, so it must come out escaped in the title and in the
+// application-name meta tag core.js reads it back from.
+func TestFrontendPagesShowEscapedAppName(t *testing.T) {
+	name := `Ma "liste" <b>&</b>`
+	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
+	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback"} {
+		w := serve(router, http.MethodGet, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", path, w.Code)
+		}
+		body := w.Body.String()
+		if strings.Contains(body, "<b>&</b>") {
+			t.Errorf("GET %s contains the raw app name", path)
+		}
+		if !strings.Contains(body, `<meta name="application-name" content="Ma &#34;liste&#34; &lt;b&gt;&amp;&lt;/b&gt;">`) {
+			t.Errorf("GET %s lacks the escaped application-name meta tag", path)
+		}
+		if !strings.Contains(body, "<title>Ma &#34;liste&#34; &lt;b&gt;&amp;&lt;/b&gt;</title>") {
+			t.Errorf("GET %s lacks the escaped title", path)
+		}
+		if !strings.Contains(body, `<script defer src="/js/core.js"></script>`) {
+			t.Errorf("GET %s doesn't load the shared scripts", path)
+		}
+	}
+}

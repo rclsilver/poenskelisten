@@ -1,166 +1,73 @@
-function load_page(result) {
+// Registration: name, e-mail, password twice, an invite code and consent.
+// On an OIDC-only server accounts come from the identity provider instead.
+(function () {
+    "use strict";
+    var h = P.h;
 
-    // Reset cookie
-    set_cookie("poenskelisten", "", 1);
-
-    if(!LOCAL_LOGIN_ENABLED) {
-        load_page_oidc_only();
-        return;
+    function input(type, name, autocomplete, value) {
+        return h("input", { type: type, name: name, required: true, value: value || "", attrs: { autocomplete: autocomplete } });
     }
 
-    var html = `
-                <div class="" id="forside">
+    P.page({
+        title: "register.heading",
+        init: function (main) {
+            set_cookie("poenskelisten", "", 1);
 
-                    <div class="module" id="news_feed">
-                    </div>
-                    
-                    <div class="module">
-                    
-                        <div class="title">
-                            Register
-                        </div>
-
-                        <div class="text-body">
-                            Did you get an invitation?
-                        </div>
-
-                        <br>
-                        <br>
-
-                        <div class="action-block">
-                            <form action="" class="icon-border" onsubmit="event.preventDefault(); send_registration();">
-
-                                <label id="form-input-icon" for="email"></label>
-                                <input type="email" name="email" id="email" placeholder="Email" required/>
-
-                                <label id="form-input-icon" for="first_name"></label>
-                                <input type="text" name="first_name" id="first_name" placeholder="First name" required/>
-
-                                <label id="form-input-icon" for="last_name"></label>
-                                <input type="text" name="last_name" id="last_name" placeholder="Last name" required/>
-
-                                <label id="form-input-icon" for="password"></label>
-                                <input type="password" name="password" id="password" placeholder="Password" required/>
-
-                                <label id="form-input-icon" for="password_repeat"></label>
-                                <input type="password" name="password_repeat" id="password_repeat" placeholder="Repeat the password" required/>
-
-                                <label id="form-input-icon" for="invitation_code"></label>
-                                <input type="text" name="invitation_code" id="invitation_code" placeholder="Invitation code" required/>
-                                
-                                <input class="clickable" style="margin-top: 2em;" type="checkbox" id="confirm" name="confirm" value="confirm" required>
-                                <label for="confirm" class="clickable"> I confirm that {{.appName}} can store relevant information about me and that I am atleast thirteen years of age.</label><br>
-
-                                <button id="register-button" type="submit" href="/">Register</button>
-
-                            </form>
-                        </div>
-                        
-                    </div>
-
-                </div>
-    `;
-
-    document.getElementById('content').innerHTML = html;
-    document.getElementById('card-header').innerHTML = 'Tell me more about yourself.';
-    clearResponse();
-    showLoggedOutMenu();
-}
-
-// OIDC-only instance: there's no self-registration; accounts come from the
-// identity provider on first sign-in (or are linked by email).
-function load_page_oidc_only() {
-    var providerName = escapeHTML(OIDC_PROVIDER_NAME);
-
-    document.getElementById('content').innerHTML = `
-                <div class="" id="forside">
-                    <div class="module">
-
-                        <div class="title">
-                            Register
-                        </div>
-
-                        <div class="text-body">
-                            Accounts on this server are managed by ` + providerName + `. Log in with ` + providerName + ` instead; if you're allowed access, your account is set up automatically or by an administrator.
-                        </div>
-
-                        <br>
-                        <br>
-
-                        <div class="action-block">
-                            <button type="button" onclick="window.location.href='/login';">Go to login</button>
-                        </div>
-
-                    </div>
-                </div>
-    `;
-    document.getElementById('card-header').innerHTML = 'Tell me more about yourself.';
-    clearResponse();
-    showLoggedOutMenu();
-}
-
-function send_registration(){
-
-    var user_email = document.getElementById("email").value;
-    var user_password = document.getElementById("password").value;
-    var user_password_repeat = document.getElementById("password_repeat").value;
-    var user_first_name = document.getElementById("first_name").value;
-    var user_last_name = document.getElementById("last_name").value;
-    var invitation_code = document.getElementById("invitation_code").value;
-
-    var form_obj = { 
-                                    "email" : user_email,
-                                    "password" : user_password,
-                                    "password_repeat": user_password_repeat,
-                                    "first_name": user_first_name,
-                                    "last_name": user_last_name,
-                                    "invite_code": invitation_code
-                                };
-
-    var form_data = JSON.stringify(form_obj);
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                clear_data();
+            if (!window.LOCAL_LOGIN_ENABLED) {
+                var provider = window.OIDC_PROVIDER_NAME || P.t("login.sso");
+                P.authLayout(main, P.t("register.title"), P.t("register.oidcOnly", { provider: provider }), [
+                    h("h2", { text: P.t("register.heading") }),
+                    h("a", { class: "btn primary wide", href: "/login", text: P.t("register.goToLogin") })
+                ], "headphones");
                 return;
             }
-            
-            if(result.error) {
 
-                error(result.error);
-                clear_data();
+            var firstName = input("text", "first_name", "given-name");
+            var lastName = input("text", "last_name", "family-name");
+            var email = input("email", "email", "email");
+            var password = input("password", "password", "new-password");
+            var repeat = input("password", "password_repeat", "new-password");
+            var invite = input("text", "invite_code", "off", new URL(window.location.href).searchParams.get("invite") || "");
+            var consent = P.checkbox(P.t("register.consent"), false, null, { required: true, name: "consent" });
+            var button = h("button", { type: "submit", class: "btn primary", text: P.t("register.submit") });
 
-            } else {
+            var form = h("form", { class: "form-grid", on: { submit: function (event) {
+                event.preventDefault();
+                P.formError(form, "");
+                if (password.value !== repeat.value) {
+                    P.formError(form, P.t("field.passwordMismatch"));
+                    return;
+                }
+                P.busy(button, P.api("POST", "open/users", {
+                    first_name: firstName.value.trim(),
+                    last_name: lastName.value.trim(),
+                    email: email.value.trim(),
+                    password: password.value,
+                    password_repeat: repeat.value,
+                    invite_code: invite.value.trim()
+                })).then(function () {
+                    P.mount(form,
+                        h("p", { class: "notice ok", role: "status", text: P.t("register.done") }),
+                        h("a", { class: "btn primary wide", href: "/login", text: P.t("register.goToLogin") }));
+                }, function (err) {
+                    password.value = "";
+                    repeat.value = "";
+                    P.formError(form, err.message);
+                });
+            } } },
+                h("div", { class: "field-row" }, P.field(P.t("field.firstName"), firstName, null, true), P.field(P.t("field.lastName"), lastName, null, true)),
+                P.field(P.t("field.email"), email, null, true),
+                h("div", { class: "field-row" }, P.field(P.t("field.password"), password, null, true), P.field(P.t("field.repeatPassword"), repeat, null, true)),
+                P.field(P.t("register.invite"), invite, P.t("register.inviteHelp"), true),
+                consent.el,
+                button);
 
-                success(result.message);
-                clear_data();
-                disable_register_button();
-
-            }
-
-        } else {
-            info("Registering...");
+            P.authLayout(main, P.t("register.title"), P.t("register.intro"), [
+                h("h2", { text: P.t("register.heading") }),
+                form,
+                h("div", { class: "auth-links" }, h("a", { href: "/login", text: P.t("register.haveAccount") }))
+            ], "headphones");
+            firstName.focus();
         }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "open/users");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.send(form_data);
-    return false;
-}
-
-function clear_data() {
-    document.getElementById("password").value = "";
-    document.getElementById("password_repeat").value = ""
-}
-
-function disable_register_button() {
-    document.getElementById("register-button").disabled = true;
-}
+    });
+})();
