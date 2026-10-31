@@ -763,3 +763,16 @@ func TestInitRouterRateLimitsCanBeTurnedOff(t *testing.T) {
 		}
 	}
 }
+
+// The headers come from a global middleware, so they are on pages, the API
+// and the OAuth endpoints alike.
+func TestInitRouterSetsSecurityHeaders(t *testing.T) {
+	router := initRouter(models.ConfigStruct{})
+	for _, path := range []string{"/login", "/api/auth/me", "/.well-known/oauth-authorization-server", "/no-such-page"} {
+		w := serve(router, http.MethodGet, path)
+		if w.Header().Get("X-Frame-Options") != "DENY" || w.Header().Get("X-Content-Type-Options") != "nosniff" ||
+			w.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" || w.Header().Get("Referrer-Policy") != "same-origin" {
+			t.Errorf("GET %s headers = %v, want the security headers", path, w.Header())
+		}
+	}
+}

@@ -172,6 +172,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 		_ = router.SetTrustedProxies(nil)
 	}
 	router.Use(middlewares.WarnUntrustedForwardedFor())
+	router.Use(middlewares.SecurityHeaders())
 
 	// Routes whose JSON body can carry a base64 image get a raised limit.
 	router.Use(middlewares.MaxBodySize(middlewares.DefaultMaxBodyBytes, map[string]int64{

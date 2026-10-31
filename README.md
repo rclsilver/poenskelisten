@@ -143,6 +143,10 @@ Pønskelisten keeps its state in `files/` (config, log and, with SQLite, the dat
 
 Behind a reverse proxy (Traefik, Caddy, nginx, ...), every connection comes from the proxy, which passes the visitor's address in `X-Forwarded-For`. Pønskelisten only believes that header from the proxies listed in `trustedproxies`, since any client can send it. Set it to your proxy's address or network, e.g. `trustedproxies=172.18.0.0/16` for a proxy on a Docker network, or the pod network (e.g. `10.244.0.0/16`) on Kubernetes. Without it, every visitor is seen with the proxy's address, which shows in session lists and makes everyone share the same rate limits; a warning is logged once when that happens. Your proxy must overwrite or append to `X-Forwarded-For`, not pass a client's own value through untouched (Traefik, Caddy and nginx's `$proxy_add_x_forwarded_for` all do).
 
+### Security headers
+
+Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` (links to shops never carry a public wishlist link or a reset code in their `Referer`), and `X-Frame-Options: DENY` with `Content-Security-Policy: frame-ancestors 'none'`, so no other site can frame Pønskelisten, for instance to trick a click on the consent page. Embedding it in a dashboard iframe isn't possible as a result.
+
 ### Rate limits
 
 Password and code checks are rate-limited per visitor address (IPv6 addresses are grouped by `/64`), with a sliding window. Requests over a limit get `429 Too Many Requests` and a `Retry-After` header, and the first refusal per address and window is logged as a warning.
