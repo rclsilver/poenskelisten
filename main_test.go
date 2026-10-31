@@ -916,7 +916,7 @@ func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 	name := `Ma "liste" <b>&</b>`
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
 	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback",
-		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc"} {
+		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account"} {
 		w := serve(router, http.MethodGet, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s = %d, want 200", path, w.Code)

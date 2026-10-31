@@ -1,774 +1,262 @@
-function load_page(result) {
+// Account page: profile (e-mail, picture, password, all confirmed with the
+// current password), two-factor authentication, display preferences,
+// sessions and connected apps. First and last names can't be changed.
+// Accounts that sign in through OIDC manage e-mail, password and MFA at their
+// provider; local accounts on an OIDC-only server keep only their picture and
+// e-mail.
+(function () {
+    "use strict";
+    var h = P.h;
 
-    var mfa_enrollment_required = false;
-
-    if(result !== false) {
-
-        try {
-
-            var login_data = JSON.parse(result);
-
-            var email = login_data.data.email
-            var first_name = login_data.data.first_name
-            var last_name = login_data.data.last_name
-            var user_id = login_data.data.id
-            admin = login_data.data.admin;
-            mfa_enrollment_required = login_data.mfa_enrollment_required === true;
-        } catch {
-            var email = ""
-            var first_name = ""
-            var last_name = ""
-            var user_id = 0;
-            admin = false;
-        }
-
-        showAdminMenu(admin)
-
-    } else {
-        var email = ""
-        var first_name = ""
-        var last_name = ""
-        var user_id = 0;
-    }
-
-    try {
-        string_index = document.URL.lastIndexOf('/');
-        wishlist_id = document.URL.substring(string_index+1);
-
-        group_id = 0
-    }
-    catch {
-        group_id = 0
-        wishlist_id = 0
-    }
-
-    var html = `
-                <div class="" id="front-page">
-                    
-                    <div class="module">
-
-                        <div class="user-active-profile-photo">
-                            <img style="width: 100%; height: 100%;" class="user-active-profile-photo-img" id="user-active-profile-photo-img" src="/assets/loading.svg">
-                        </div>
-
-                        <b><p id="user_name" style="font-size: 1.25em;"></p></b>
-                        <p id="join_date" style=""></p>
-                        <p id="user_admin" style=""></p>
-
-                        <div class="module color-invert" id="" style="">
-                            <hr>
-                        </div>
-                    
-                        <div id="oidc-account-note" class="alert alert-info" style="display:none; margin: 0 1em 1em 1em;"></div>
-
-                        <form action="" class="icon-border" style="margin: 0 1em;" onsubmit="event.preventDefault(); send_update();">
-
-                            <label id="form-input-icon" for="email"></label>
-                            <input type="email" name="email" id="email" placeholder="Email" value="" required/>
-
-                            <div id="credential-section">
-                                <input class="clickable" onclick="change_password_toggle();" style="margin-top: 2em;" type="checkbox" id="password-toggle" name="password-toggle" value="confirm" >
-                                <label for="password-toggle" class="clickable">Change my password.</label><br>
-
-                                <div id="change-password-box" style="display:none;">
-
-                                    <label id="form-input-icon" for="password"></label>
-                                    <input type="password" name="password" id="password" placeholder="New password" />
-
-                                    <label id="form-input-icon" for="password_repeat"></label>
-                                    <input type="password" name="password_repeat" id="password_repeat" placeholder="Repeat the password" />
-
-                                </div>
-                            </div>
-
-                            <label id="form-input-icon" for="new_profile_image" style="margin-top: 2em;">Replace profile image:</label>
-                            <input type="file" name="new_profile_image" id="new_profile_image" placeholder="" value="" accept="image/png, image/jpeg" />
-
-                            <div id="password-original-section">
-                                <label id="form-input-icon" for="password_original"></label>
-                                <input type="password" name="password_original" id="password_original" placeholder="Your current password" required />
-                            </div>
-
-                            <button id="update-button" style="margin-top: 2em;" type="submit" href="/">Update account</button>
-
-                        </form>
-
-                    </div>
-
-                    <div class="module" id="mfa-module">
-
-                        <div class="module color-invert" id="" style="">
-                            <hr>
-                        </div>
-
-                        <b><p style="font-size: 1.25em;">Two-factor authentication</p></b>
-                        <p id="mfa-status" style="margin: 0 1em;">...</p>
-
-                        <div id="mfa-action" style="margin: 1em;"></div>
-
-                    </div>
-
-                    <div class="module" id="sessions-module">
-
-                        <div class="module color-invert" id="" style="">
-                            <hr>
-                        </div>
-
-                        <b><p style="font-size: 1.25em;">Sessions</p></b>
-                        <p style="margin: 0 1em;">Signed in on another device you no longer use? Sign out everywhere.</p>
-
-                        <div style="margin: 1em;">
-                            <button type="button" style="padding: 0.75em 1em;" onclick="logoutAllDevices();">Sign out of all devices</button>
-                        </div>
-
-                    </div>
-
-                    <div class="module" id="connected-apps-module">
-
-                        <div class="module color-invert" id="" style="">
-                            <hr>
-                        </div>
-
-                        <b><p style="font-size: 1.25em;">Connected apps</p></b>
-                        <p style="margin: 0 1em;">Apps you've allowed to access your account.</p>
-
-                        <div id="connected-apps-list" style="margin: 1em;"></div>
-
-                    </div>
-
-                </div>
-    `;
-
-    document.getElementById('content').innerHTML = html;
-    document.getElementById('card-header').innerHTML = 'Your very own page...';
-    clearResponse();
-
-    if(result !== false) {
-        showLoggedInMenu();
-
-        if(mfa_enrollment_required) {
-            // Under enforcement the rest of the API is blocked until the user
-            // enrolls, so skip the profile calls (they would 403) and take the
-            // user straight to enrollment.
-            error("Your administrator requires two-factor authentication. Please set it up to continue.");
-            document.getElementById("mfa-status").innerHTML = "Required by your administrator, but not yet set up.";
-            mfaEnroll();
-        } else {
-            GetUserData(user_id);
-            GetProfileImage(user_id);
-            getConnectedApps();
-        }
-    } else {
-        showLoggedOutMenu();
-        invalid_session();
-    }
-}
-
-// Escape untrusted strings (e.g. an app's registered name) before injecting.
-function escapeAccount(value) {
-    return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
-// Load the third-party apps the user has authorized.
-function getConnectedApps() {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e + ' - Response: ' + this.responseText);
-                return;
+    function profilePanel(account) {
+        var oidc = account.auth_source === "oidc";
+        var localLogin = !!window.LOCAL_LOGIN_ENABLED;
+        var provider = window.OIDC_PROVIDER_NAME || P.t("login.sso");
+        var picture = h("span", { class: "avatar large", attrs: { "aria-hidden": "true" } }, P.initials(account));
+        P.profileImage(account.id, false).then(function (src) {
+            if (src) {
+                P.mount(picture, h("img", { src: src, alt: "" }));
             }
-            if(result.error) {
-                return;
-            }
-            placeConnectedApps(result.apps);
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/connected-apps");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-}
-
-function placeConnectedApps(apps) {
-    var container = document.getElementById("connected-apps-list");
-    if(!container) {
-        return;
-    }
-    if(!apps || apps.length === 0) {
-        container.innerHTML = `<p style="font-size: 0.9em;">No apps connected.</p>`;
-        return;
-    }
-
-    var html = "";
-    for(var i = 0; i < apps.length; i++) {
-        var app = apps[i];
-        var scopeItems = "";
-        for(var j = 0; j < app.scopes.length; j++) {
-            scopeItems += `<li>${escapeAccount(app.scopes[j].description)}</li>`;
-        }
-        html += `
-            <div style="border: 1px solid; border-radius: 0.5em; padding: 0.75em; margin-bottom: 0.5em; text-align: left;">
-                <b>${escapeAccount(app.client_name)}</b>
-                <ul style="margin: 0.4em 0; padding-left: 1.2em; font-size: 0.85em;">${scopeItems}</ul>
-                <button type="button" style="padding: 0.5em 1em;" onclick="revokeConnectedApp('${escapeAccount(app.client_id)}')">Disconnect</button>
-            </div>
-        `;
-    }
-    container.innerHTML = html;
-}
-
-function revokeConnectedApp(clientID) {
-    if(!confirm("Disconnect this app? It will lose access to your account.")) {
-        return;
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e + ' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            if(result.error) {
-                error(result.error);
-            } else {
-                success(result.message);
-                getConnectedApps();
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("delete", api_url + "auth/connected-apps/" + clientID);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-}
-
-// Render the two-factor section based on whether MFA is currently enabled.
-function renderMFASection(enabled) {
-    var statusEl = document.getElementById("mfa-status");
-    var actionEl = document.getElementById("mfa-action");
-    if(!statusEl || !actionEl) {
-        return;
-    }
-
-    if(enabled) {
-        statusEl.innerHTML = "Enabled. Your account is protected by an authenticator app.";
-        actionEl.innerHTML = `
-            <button id="mfa-disable-button" onclick="renderMFADisable();" type="button" style="padding: 0.75em 1em;">Disable two-factor authentication</button>
-        `;
-    } else {
-        statusEl.innerHTML = "Disabled. Add an authenticator app for extra protection.";
-        actionEl.innerHTML = `
-            <button id="mfa-enable-button" onclick="mfaEnroll();" type="button" style="padding: 0.75em 1em;">Enable two-factor authentication</button>
-        `;
-    }
-}
-
-// Begin enrollment: request a secret and show the activation form.
-function mfaEnroll() {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-
-            if(result.error) {
-                error(result.error);
-            } else {
-                renderMFAActivate(result.secret, result.otpauth_url, result.qr_code);
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "open/users/mfa/enroll");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-// Show the QR code, manual secret, and a form to confirm the first code.
-function renderMFAActivate(secret, otpauthURL, qrCode) {
-    var actionEl = document.getElementById("mfa-action");
-    if(!actionEl) {
-        return;
-    }
-
-    var qrHTML = "";
-    if(qrCode) {
-        qrHTML = `<img src="${qrCode}" alt="Scan this QR code with your authenticator app" style="width: 12em; height: 12em; max-width: 100%; margin: 0.5em auto; display: block; image-rendering: pixelated;">`;
-    }
-
-    actionEl.innerHTML = `
-        <p style="margin-bottom: 0.5em;">1. Scan this QR code with your authenticator app:</p>
-        ${qrHTML}
-        <p style="margin: 0.5em 0; font-size: 0.85em;">Can't scan it? Enter this key manually:</p>
-        <p style="font-family: monospace; word-break: break-all; font-size: 1.1em;" id="mfa-secret">${secret}</p>
-        <p style="word-break: break-all; font-size: 0.8em;"><a href="${otpauthURL}">Open in authenticator app</a></p>
-
-        <form action="" class="icon-border" style="margin-top: 1em;" onsubmit="event.preventDefault(); mfaActivate();">
-            <p style="margin-bottom: 0.5em;">2. Enter the 6-digit code to confirm:</p>
-            <label id="form-input-icon" for="mfa_activate_code"></label>
-            <input type="text" name="mfa_activate_code" id="mfa_activate_code" placeholder="6-digit code" autocomplete="one-time-code" inputmode="numeric" required/>
-            <button id="mfa-activate-button" type="submit" style="padding: 0.75em 1em;">Confirm and enable</button>
-        </form>
-
-        <p style="margin-top: 0.5em; font-size: 0.8em; cursor: pointer;"><a onclick="renderMFASection(false);">Cancel</a></p>
-    `;
-}
-
-// Confirm the code, enabling MFA and revealing recovery codes.
-function mfaActivate() {
-    var code = document.getElementById("mfa_activate_code").value;
-
-    var form_data = JSON.stringify({ "code" : code });
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-
-            if(result.error) {
-                error(result.error);
-                try {
-                    document.getElementById("mfa_activate_code").value = "";
-                } catch(e) {
-                    console.log(e)
-                }
-            } else {
-                success(result.message);
-                if(result.recovery_codes && result.recovery_codes.length) {
-                    document.getElementById("mfa-status").innerHTML = "Enabled. Save your recovery codes below.";
-                    showRecoveryCodes(result.recovery_codes);
-                } else {
-                    // Recovery codes are disabled by the administrator.
-                    renderMFASection(true);
-                }
-            }
-        } else {
-            info("Enabling two-factor authentication...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "open/users/mfa/activate");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send(form_data);
-    return false;
-}
-
-// Display the one-time recovery codes. These are only shown once.
-function showRecoveryCodes(codes) {
-    var actionEl = document.getElementById("mfa-action");
-    if(!actionEl) {
-        return;
-    }
-
-    var codesHTML = "";
-    if(codes && codes.length) {
-        for(var i = 0; i < codes.length; i++) {
-            codesHTML += `<div style="font-family: monospace; font-size: 1.05em;">${codes[i]}</div>`;
-        }
-    }
-
-    actionEl.innerHTML = `
-        <p style="margin-bottom: 0.5em;"><b>Save these recovery codes.</b> Each can be used once if you lose access to your authenticator. They won't be shown again.</p>
-        <div id="mfa-recovery-codes" style="margin: 0.5em auto; padding: 0.5em; border: 1px solid; max-width: 14em; text-align: center;">
-            ${codesHTML}
-        </div>
-        <br>
-        <button type="button" onclick="renderMFASection(true);" style="padding: 0.75em 1em;">I've saved my codes</button>
-    `;
-}
-
-// Show the form required to turn MFA off.
-function renderMFADisable() {
-    var actionEl = document.getElementById("mfa-action");
-    if(!actionEl) {
-        return;
-    }
-
-    actionEl.innerHTML = `
-        <form action="" class="icon-border" onsubmit="event.preventDefault(); mfaDisable();">
-            <p style="margin-bottom: 0.5em;">Confirm your password and a current code to disable two-factor authentication.</p>
-
-            <label id="form-input-icon" for="mfa_disable_password"></label>
-            <input type="password" name="mfa_disable_password" id="mfa_disable_password" placeholder="Your current password" required/>
-
-            <label id="form-input-icon" for="mfa_disable_code"></label>
-            <input type="text" name="mfa_disable_code" id="mfa_disable_code" placeholder="Authenticator or recovery code" autocomplete="one-time-code" required/>
-
-            <button id="mfa-disable-confirm-button" type="submit" style="padding: 0.75em 1em;">Disable</button>
-        </form>
-
-        <p style="margin-top: 0.5em; font-size: 0.8em; cursor: pointer;"><a onclick="renderMFASection(true);">Cancel</a></p>
-    `;
-}
-
-// Send the disable request.
-function mfaDisable() {
-    var password = document.getElementById("mfa_disable_password").value;
-    var code = document.getElementById("mfa_disable_code").value;
-
-    var form_data = JSON.stringify({ "password" : password, "code" : code });
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-
-            if(result.error) {
-                error(result.error);
-            } else {
-                success(result.message);
-                renderMFASection(false);
-            }
-        } else {
-            info("Disabling two-factor authentication...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "auth/users/mfa/disable");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send(form_data);
-    return false;
-}
-
-// Revoke every session for the current user and return to login.
-function logoutAllDevices() {
-    if(!confirm("Sign out of all devices? You'll need to log in again everywhere.")) {
-        return;
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            set_cookie("poenskelisten", "", 1);
-            window.location.href = '/login';
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "auth/tokens/logout-all");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-}
-
-function change_password_toggle() {
-
-    var check_box = document.getElementById("password-toggle").checked;
-    var password_box = document.getElementById("change-password-box")
-
-    if(check_box) {
-        password_box.style.display = "inline-block"
-    } else {
-        password_box.style.display = "none"
-    }
-
-}
-
-function send_update() {
-
-    var email = document.getElementById("email").value;
-    var password = document.getElementById("password").value;
-    var password_repeat = document.getElementById("password_repeat").value;
-    var password_original = document.getElementById("password_original").value;
-    var new_profile_image = document.getElementById('new_profile_image').files[0];
-
-    if(new_profile_image) {
-
-        if(new_profile_image.size > 10000000) {
-            error("Image exceeds 10MB size limit.")
-            return;
-        }
-
-        new_profile_image = get_base64(new_profile_image);
-        
-        new_profile_image.then(function(result) {
-
-            var form_obj = { 
-                "email" : email,
-                "password" : password,
-                "password_repeat": password_repeat,
-                "profile_image": result,
-                "password_original": password_original
-            };
-
-            var form_data = JSON.stringify(form_obj);
-
-            document.getElementById("user-active-profile-photo-img").src = 'assets/loading.svg';
-
-            send_update_two(form_data);
-        
         });
 
-    } else {
-
-        var form_obj = { 
-            "email" : email,
-            "password" : password,
-            "password_repeat": password_repeat,
-            "password_original": password_original,
-            "profile_image": ""
-        };
-
-        var form_data = JSON.stringify(form_obj);
-    
-        send_update_two(form_data);
-    }
-
-}
-
-function send_update_two(form_data) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
+        var email = h("input", { type: "email", name: "email", required: !oidc, readOnly: oidc, value: account.email || "", attrs: { autocomplete: "email" } });
+        var file = h("input", { type: "file", name: "picture", accept: "image/png,image/jpeg" });
+        var imageData = "";
+        var imageError = h("p", { class: "field-error", role: "alert", hidden: true });
+        file.addEventListener("change", function () {
+            imageError.hidden = true;
+            imageData = "";
+            var chosen = file.files && file.files[0];
+            if (!chosen) {
                 return;
             }
-            
-            if(result.error) {
+            P.readImageFile(chosen).then(function (data) {
+                imageData = data;
+                P.mount(picture, h("img", { src: data, alt: "" }));
+            }, function (err) {
+                file.value = "";
+                imageError.textContent = err.message;
+                imageError.hidden = false;
+            });
+        });
 
-                error(result.error);
+        var password = h("input", { type: "password", name: "password", attrs: { autocomplete: "new-password" } });
+        var repeat = h("input", { type: "password", name: "password_repeat", attrs: { autocomplete: "new-password" } });
+        var current = h("input", { type: "password", name: "password_original", required: !oidc, attrs: { autocomplete: "current-password" } });
+        var save = h("button", { type: "submit", class: "btn primary", text: P.t("action.save") });
 
-            } else {
+        var note = null;
+        if (oidc) {
+            note = h("p", { class: "notice", text: P.t("account.oidcNote", { provider: provider }) });
+        } else if (!localLogin) {
+            note = h("p", { class: "notice", text: P.t("account.localLoginOffNote", { provider: provider }) });
+        }
 
-                success(result.message);
-
-                if(result.verified) {
-                    location.reload();
-                } else {
-                    location.href = './';
+        var form = h("form", { class: "form-grid", on: { submit: function (event) {
+            event.preventDefault();
+            P.formError(form, "");
+            if (password.value !== repeat.value) {
+                P.formError(form, P.t("field.passwordMismatch"));
+                return;
+            }
+            var changedPassword = !!password.value;
+            P.busy(save, P.api("POST", "auth/users/update", {
+                email: email.value.trim(),
+                password: password.value,
+                password_repeat: repeat.value,
+                password_original: current.value,
+                profile_image: imageData
+            })).then(function (result) {
+                current.value = "";
+                password.value = "";
+                repeat.value = "";
+                if (result.verified === false) {
+                    // A new e-mail must be verified: the sign-in flow takes
+                    // the user to /verify.
+                    window.location.href = "/";
+                    return;
                 }
-                
-            }
+                P.toast(changedPassword ? P.t("account.passwordChanged") : P.t("account.saved"));
+                if (changedPassword) {
+                    // Other sessions were signed out and this one renewed:
+                    // reloading picks up fresh tokens.
+                    window.setTimeout(function () { window.location.reload(); }, 1200);
+                }
+            }, function (err) {
+                current.value = "";
+                P.formError(form, err.message);
+            });
+        } } },
+            note,
+            P.field(P.t("field.email"), email, oidc ? null : P.t("account.emailHelp")),
+            h("div", { class: "image-field" }, P.field(P.t("account.picture"), file, P.t("account.pictureHelp")), imageError),
+            !oidc && localLogin ? h("fieldset", null,
+                h("legend", { text: P.t("account.newPassword") }),
+                h("p", { class: "help", text: P.t("account.newPasswordHelp") }),
+                h("div", { class: "field-row" }, P.field(P.t("field.newPassword"), password), P.field(P.t("field.repeatPassword"), repeat))) : null,
+            !oidc ? P.field(P.t("account.currentPassword"), current, P.t("account.currentPasswordHelp"), true) : null,
+            h("div", { class: "form-actions" }, save));
 
-        } else {
-            info("Updating account...");
+        return h("section", { class: "panel", "aria-labelledby": "profile-title" },
+            h("div", { class: "row" },
+                picture,
+                h("div", { class: "stack tight" },
+                    h("h2", { id: "profile-title", text: P.displayName(account) }),
+                    h("p", { class: "help", text: P.t("account.joined", { date: P.fmtDate(account.created_at) }) }),
+                    account.admin ? h("span", { class: "badge ok", text: P.t("account.admin") }) : null)),
+            h("p", { class: "help", text: P.t("account.nameFixed") }),
+            h("hr"),
+            form);
+    }
+
+    function mfaPanel(account) {
+        var body = h("div", { class: "stack" });
+        var panel = h("section", { class: "panel", "aria-labelledby": "mfa-title" },
+            h("h2", { id: "mfa-title", text: P.t("mfa.heading") }),
+            h("p", { class: "help", text: P.t("account.mfaIntro") }),
+            body);
+        var provider = window.OIDC_PROVIDER_NAME || P.t("login.sso");
+        if (account.auth_source === "oidc" || !window.LOCAL_LOGIN_ENABLED) {
+            P.mount(body, h("p", { class: "notice", text: P.t("account.mfaManaged", { provider: provider }) }));
+            return panel;
         }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "auth/users/update");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send(form_data);
-    return false;
 
-}
-
-function GetProfileImage(userID) {
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
+        var enabled = account.mfa_enabled === true;
+        var draw = function () {
+            if (enabled) {
+                P.mount(body,
+                    h("p", null, h("span", { class: "badge ok" }, P.icon("check"), P.t("account.mfaOn"))),
+                    P.button(P.t("account.mfaDisable"), drawDisable, "", "lock"));
             } else {
-
-                PlaceProfileImage(result.image)
-                
+                P.mount(body,
+                    h("p", null, h("span", { class: "badge warn", text: P.t("account.mfaOff") })),
+                    P.button(P.t("account.mfaEnable"), function () {
+                        P.mfaEnrol(body, function () {
+                            enabled = true;
+                            P.toast(P.t("account.mfaEnabled"));
+                            draw();
+                        }, draw);
+                    }, "primary", "lock"));
             }
+        };
+        var drawDisable = function () {
+            var password = h("input", { type: "password", name: "password", required: true, attrs: { autocomplete: "current-password" } });
+            var code = h("input", { type: "text", name: "code", required: true, attrs: { autocomplete: "one-time-code", spellcheck: "false" } });
+            var submit = h("button", { type: "submit", class: "btn danger", text: P.t("account.mfaDisable") });
+            var form = h("form", { class: "form-grid", on: { submit: function (event) {
+                event.preventDefault();
+                P.formError(form, "");
+                P.busy(submit, P.api("POST", "auth/users/mfa/disable", { password: password.value, code: code.value.trim() })).then(function () {
+                    enabled = false;
+                    P.toast(P.t("account.mfaDisabled"));
+                    draw();
+                }, function (err) {
+                    password.value = "";
+                    code.value = "";
+                    P.formError(form, err.message);
+                });
+            } } },
+                h("p", { class: "help", text: P.t("account.mfaDisableHelp") }),
+                P.field(P.t("account.currentPassword"), password, null, true),
+                P.field(P.t("mfa.code"), code, P.t("mfa.codeHelp"), true),
+                h("div", { class: "row" }, submit, P.button(P.t("action.cancel"), draw, "quiet")));
+            P.mount(body, form);
+            password.focus();
+        };
+        draw();
+        return panel;
+    }
 
-        } else {
-            // info("Loading week...");
+    function preferencesPanel() {
+        var theme = h("select", { name: "theme" },
+            h("option", { value: "system", text: P.t("prefs.themeSystem") }),
+            h("option", { value: "light", text: P.t("prefs.themeLight") }),
+            h("option", { value: "dark", text: P.t("prefs.themeDark") }));
+        var saved = P.prefs.get("theme");
+        theme.value = saved === "light" || saved === "dark" ? saved : "system";
+        theme.addEventListener("change", function () {
+            P.setTheme(theme.value);
+            var header = document.getElementById("pref-theme");
+            if (header) {
+                header.value = theme.value;
+            }
+        });
+        var lang = h("select", { name: "language" },
+            h("option", { value: "en", lang: "en", text: "English" }),
+            h("option", { value: "fr", lang: "fr", text: "Français" }));
+        lang.value = P.lang;
+        lang.addEventListener("change", function () { P.setLang(lang.value); });
+        return h("section", { class: "panel form-grid", "aria-labelledby": "prefs-title" },
+            h("h2", { id: "prefs-title", text: P.t("prefs.title") }),
+            h("p", { class: "help", text: P.t("account.prefsHelp") }),
+            P.field(P.t("prefs.theme"), theme),
+            P.field(P.t("prefs.language"), lang));
+    }
+
+    function sessionsPanel() {
+        var apps = h("div", null, P.loading());
+        var loadApps = function () {
+            P.api("GET", "auth/connected-apps").then(function (result) {
+                var list = result.apps || [];
+                P.mount(apps, list.length ? list.map(function (app) {
+                    return h("div", { class: "member-row" },
+                        h("div", { class: "grow" },
+                            h("strong", { text: app.client_name || app.client_id }),
+                            h("ul", { class: "help" }, (app.scopes || []).map(function (scope) { return h("li", { text: scope.description }); }))),
+                        P.button(P.t("account.disconnectApp"), function () {
+                            P.confirm({ title: P.t("account.disconnectTitle"), message: P.t("account.disconnectConfirm", { name: app.client_name || app.client_id }), confirm: P.t("account.disconnectApp"), danger: true }).then(function (yes) {
+                                if (yes) {
+                                    P.api("DELETE", "auth/connected-apps/" + encodeURIComponent(app.client_id)).then(function () {
+                                        P.toast(P.t("account.appDisconnected"));
+                                        loadApps();
+                                    }, P.error);
+                                }
+                            });
+                        }, "small danger-quiet"));
+                }) : h("p", { class: "help", text: P.t("account.noApps") }));
+            }, function (err) {
+                P.mount(apps, h("p", { class: "field-error", text: err.message }));
+            });
+        };
+        loadApps();
+        return h("section", { class: "panel stack", "aria-labelledby": "sessions-title" },
+            h("h2", { id: "sessions-title", text: P.t("account.security") }),
+            h("div", { class: "stack tight" },
+                h("h3", { text: P.t("account.sessions") }),
+                h("p", { class: "help", text: P.t("account.sessionsHelp") }),
+                h("div", null, P.button(P.t("account.logoutAll"), function () {
+                    P.confirm({ title: P.t("account.logoutAllTitle"), message: P.t("account.logoutAllConfirm"), confirm: P.t("account.logoutAll"), danger: true }).then(function (yes) {
+                        if (yes) {
+                            P.api("POST", "auth/tokens/logout-all").then(function () {
+                                set_cookie("poenskelisten", "", 1);
+                                window.location.href = "/login";
+                            }, P.error);
+                        }
+                    });
+                }, "danger-quiet", "logOut"))),
+            h("hr"),
+            h("div", { class: "stack tight" },
+                h("h3", { text: P.t("account.apps") }),
+                h("p", { class: "help", text: P.t("account.appsHelp") }),
+                apps));
+    }
+
+    P.page({
+        session: "required",
+        title: "nav.account",
+        init: function (main, user) {
+            P.api("GET", "auth/users/" + encodeURIComponent(user.id)).then(function (result) {
+                var account = result.user;
+                P.mount(main,
+                    P.pageHeader(P.t("account.eyebrow"), P.t("account.title"), P.t("account.intro"),
+                        P.button(P.t("nav.logout"), function () { logout(); }, "", "logOut")),
+                    h("div", { class: "settings-grid" },
+                        profilePanel(account),
+                        h("div", { class: "stack" }, mfaPanel(account), preferencesPanel()),
+                        h("div", { class: "full" }, sessionsPanel())));
+            }, function (err) {
+                P.mount(main, P.emptyState(err.message));
+            });
         }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/users/" + userID + "/image");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-
-    return;
-
-}
-
-function PlaceProfileImage(imageBase64) {
-
-    document.getElementById("user-active-profile-photo-img").src = imageBase64
-
-}
-
-function GetUserData(userID) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                PlaceUserData(result.user)
-                
-            }
-
-        } else {
-            // info("Loading week...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/users/" + userID);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-
-    return;
-}
-
-function PlaceUserData(user_object) {
-    document.getElementById("user_name").innerHTML = user_object.first_name + " " + user_object.last_name
-    document.getElementById("email").value = user_object.email
-
-    // parse date object
-    try {
-        var date = new Date(Date.parse(user_object.created_at));
-        var date_string = GetDateString(date)
-    } catch(e) {
-        var date_string = "Error"
-        console.log("Join date error: " + e)
-    }
-
-    document.getElementById("join_date").innerHTML = "Joined: " + date_string
-
-    if(user_object.admin) {
-        var admin_string = "Yes"
-    } else {
-        var admin_string = "No"
-    }
-
-    document.getElementById("user_admin").innerHTML = "Administrator: " + admin_string
-
-    if(user_object.auth_source === 'oidc') {
-        // OIDC accounts have no local password and no local MFA; those are managed
-        // by the identity provider. Hide the credential controls so the form only
-        // updates the profile image.
-        applyOIDCAccountUI();
-    } else if(!LOCAL_LOGIN_ENABLED) {
-        // A local account on an OIDC-only instance: its password can't be used to
-        // log in any more, so changing it (or its MFA) would be pointless.
-        applyLocalLoginDisabledAccountUI();
-    } else {
-        // Reflect the current two-factor state for local accounts.
-        renderMFASection(user_object.mfa_enabled === true)
-    }
-}
-
-// Adjust the account page for an OIDC-only user: hide password/email editing and
-// the local MFA section, and drop the "required" flags so the profile form can
-// still be submitted (for the profile image).
-function applyOIDCAccountUI() {
-    var providerName = escapeHTML(OIDC_PROVIDER_NAME);
-    showAccountNote("You sign in with <b>" + providerName + "</b>. Your email, password and two-factor authentication are managed there, so they can't be changed here.");
-
-    var credentialSection = document.getElementById("credential-section");
-    if(credentialSection) {
-        credentialSection.style.display = "none";
-    }
-
-    var passwordOriginalSection = document.getElementById("password-original-section");
-    if(passwordOriginalSection) {
-        passwordOriginalSection.style.display = "none";
-    }
-
-    // Hidden required fields would otherwise block form submission.
-    try { document.getElementById("password_original").required = false; } catch(e) { console.log(e); }
-    try {
-        var emailField = document.getElementById("email");
-        emailField.required = false;
-        emailField.readOnly = true;
-    } catch(e) { console.log(e); }
-
-    // Local MFA is not applicable to OIDC accounts.
-    showMFAManagedByProvider();
-}
-
-// Adjust the account page for a local account on an OIDC-only instance: the
-// password no longer logs in, so hide password/MFA changes. The current
-// password is still asked for to confirm profile changes.
-function applyLocalLoginDisabledAccountUI() {
-    var providerName = escapeHTML(OIDC_PROVIDER_NAME);
-    showAccountNote("Password login is turned off on this server; you sign in with <b>" + providerName + "</b>. Two-factor authentication is managed there. Your current password is still needed to save changes here.");
-
-    var credentialSection = document.getElementById("credential-section");
-    if(credentialSection) {
-        credentialSection.style.display = "none";
-    }
-
-    showMFAManagedByProvider();
-}
-
-function showAccountNote(html) {
-    var note = document.getElementById("oidc-account-note");
-    if(note) {
-        note.style.display = "block";
-        note.innerHTML = html;
-    }
-}
-
-function showMFAManagedByProvider() {
-    var mfaStatus = document.getElementById("mfa-status");
-    var mfaAction = document.getElementById("mfa-action");
-    if(mfaStatus) {
-        mfaStatus.innerHTML = "Managed by " + escapeHTML(OIDC_PROVIDER_NAME) + ".";
-    }
-    if(mfaAction) {
-        mfaAction.innerHTML = "";
-    }
-}
+    });
+})();
