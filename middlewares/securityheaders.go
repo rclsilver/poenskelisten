@@ -4,31 +4,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ContentSecurityPolicy is sent on every response. script-src is 'self' only:
-// the frontend carries no inline <script> blocks, on* handler attributes or
-// javascript: URLs (markup names registered actions instead, see
-// web/js/actions.js, and TestFrontendHasNoInlineScript keeps it that way), so an
-// injected handler or script tag is refused by the browser rather than run.
-// connect-src and img-src keep fetch/XHR/beacons and image loads on this origin
-// (or inline data); object-src/base-uri shut off plugin and <base> tricks;
-// frame-ancestors stops clickjacking.
-//
-// style-src still allows 'unsafe-inline': the markup leans heavily on style
-// attributes, and injected CSS can't run script.
+// ContentSecurityPolicy is sent on every response, and only lets pages run and
+// load what the app serves itself. script-src is 'self' only: the frontend
+// carries no inline <script> blocks, on* handler attributes or javascript:
+// URLs (TestFrontendHasNoInlineScript keeps it that way), so an injected
+// handler or script tag is refused by the browser rather than run. style-src is
+// 'self' only too, since the pages have no inline style (main_test.go checks
+// it), and nothing comes from another site, fonts included. Images are
+// same-origin or data: URLs (wish and profile pictures, QR codes).
+// connect-src keeps fetch/XHR/beacons on this origin; object-src 'none' and
+// base-uri 'none' shut off plugin and <base> tricks; frame-ancestors stops
+// clickjacking.
 //
 // form-action is deliberately absent: the OAuth consent form POSTs to
 // /oauth/consent, which redirects to a third-party client's redirect_uri, and
 // browsers apply form-action to that redirect.
 const ContentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
-	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-	"font-src 'self' https://fonts.gstatic.com; " +
-	"img-src 'self' data: blob:; " +
+	"style-src 'self'; " +
+	"img-src 'self' data:; " +
+	"font-src 'self'; " +
 	"connect-src 'self'; " +
-	"worker-src 'self'; " +
 	"manifest-src 'self'; " +
+	"worker-src 'self'; " +
 	"object-src 'none'; " +
-	"base-uri 'self'; " +
+	"base-uri 'none'; " +
 	"frame-ancestors 'none'"
 
 // SecurityHeaders sets the CSP plus the companion headers that harden the

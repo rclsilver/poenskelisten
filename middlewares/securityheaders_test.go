@@ -46,10 +46,12 @@ func TestContentSecurityPolicyDirectives(t *testing.T) {
 	cases := map[string]string{
 		"default-src":     "'self'",
 		"script-src":      "'self'",
+		"style-src":       "'self'",
+		"font-src":        "'self'",
 		"connect-src":     "'self'",
-		"img-src":         "'self' data: blob:",
+		"img-src":         "'self' data:",
 		"object-src":      "'none'",
-		"base-uri":        "'self'",
+		"base-uri":        "'none'",
 		"frame-ancestors": "'none'",
 	}
 	for name, value := range cases {
@@ -59,5 +61,15 @@ func TestContentSecurityPolicyDirectives(t *testing.T) {
 	}
 	if _, ok := directives["form-action"]; ok {
 		t.Error("form-action must stay unset: it would block the OAuth consent redirect to third-party clients")
+	}
+}
+
+// The policy must stay strict: no inline or eval'd code, nothing from other
+// sites, and still no framing.
+func TestContentSecurityPolicyIsStrict(t *testing.T) {
+	for _, forbidden := range []string{"unsafe-inline", "unsafe-eval", "*", "http:", "https:", "blob:"} {
+		if strings.Contains(ContentSecurityPolicy, forbidden) {
+			t.Errorf("policy allows %q: %s", forbidden, ContentSecurityPolicy)
+		}
 	}
 }
