@@ -28,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	logrusTest "github.com/sirupsen/logrus/hooks/test"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	_ "modernc.org/sqlite"
@@ -1316,6 +1317,10 @@ func TestInitRouterTrustsForwardedForOnlyFromTrustedProxies(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			setupRouterTest(t)
+			// Every attempt hashes a password, even for an unknown address.
+			cost := models.BcryptCost
+			t.Cleanup(func() { models.BcryptCost = cost })
+			models.BcryptCost = bcrypt.MinCost
 			cfg := config.ConfigFile
 			cfg.PoenskelistenTrustedProxies = c.trusted
 			cfg.RateLimitLogin = "20/15m"
