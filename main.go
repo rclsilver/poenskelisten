@@ -360,6 +360,15 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 		c.HTML(http.StatusOK, "login.html", templateData)
 	})
 
+	// The wish and wishlist forms serve both creating (their own URL, from
+	// the path table) and editing.
+	router.GET("/wishes/:wish_id/edit", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "wishform.html", templateData)
+	})
+	router.GET("/wishlists/:wishlist_id/edit", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "wishlistform.html", templateData)
+	})
+
 	// endpoint handler building for JSON
 	router, err = registerTemplatedStaticFilesForDirectory(router, "/json", true, "./web/json", withAppText(templateData, escapeForJSONString))
 	if err != nil {
@@ -811,6 +820,8 @@ func registerTemplatedStaticFilesForDirectory(
 	filePathTableList["group.html"] = &filePathTable{urlPath: "/groups/:group_id"}
 	filePathTableList["wishlist.html"] = &filePathTable{urlPath: "/wishlists/:wishlist_id"}
 	filePathTableList["public.html"] = &filePathTable{urlPath: "/wishlists/public/:wishlist_hash"}
+	filePathTableList["wishlistform.html"] = &filePathTable{urlPath: "/wishlists/new"}
+	filePathTableList["wishform.html"] = &filePathTable{urlPath: "/wishes/new"}
 	filePathTableList["callback.html"] = &filePathTable{urlPath: "/oauth/callback"}
 	filePathTableList["enroll.html"] = &filePathTable{urlPath: "/enroll"}
 	filePathTableList["manifest.json"] = &filePathTable{urlPath: "/manifest.json"}

@@ -1,497 +1,65 @@
-function load_page(result) {
+// A public wishlist (/wishlists/public/:hash), readable without an account.
+// Visitors see which wishes are taken but not by whom. A signed-in visitor
+// who can open the list in the app is sent there to claim; its owner and
+// collaborators see no claim at all, as in the app.
+(function () {
+    "use strict";
+    var h = P.h;
 
-    if(result !== false) {
-        
-        try {
+    function listHash() {
+        var match = window.location.pathname.match(/^\/wishlists\/public\/([^\/]+)\/?$/);
+        return match ? decodeURIComponent(match[1]) : "";
+    }
 
-            var login_data = JSON.parse(result);
-            
-            var email = login_data.data.email
-            var first_name = login_data.data.first_name
-            var last_name = login_data.data.last_name
-            var user_id = login_data.data.id;
-            admin = login_data.data.admin;
-        } catch {
-            var email = ""
-            var first_name = ""
-            var last_name = ""
-            var user_id = 0;
-            admin = false;
+    P.page({
+        session: "optional",
+        title: "public.title",
+        init: function (main, user) {
+            P.api("GET", "open/wishlists/public/" + encodeURIComponent(listHash()), null, { auth: false }).then(function (result) {
+                var wishlist = result.wishlist;
+                var role = user ? P.wishlistRole(wishlist, user.id) : "";
+                var insider = role === "owner" || role === "collaborator";
+                P.setTitle(wishlist.name);
+
+                var banner = h("div");
+                var board = P.wishBoard({
+                    mode: "public",
+                    userID: user ? user.id : "",
+                    showClaims: !insider,
+                    signInHref: user ? null : "/login",
+                    empty: P.emptyState(P.t("board.empty"))
+                });
+                var expiry = P.expiryText(wishlist);
+
+                P.mount(main,
+                    h("section", { class: "list-header" },
+                        h("div", { class: "row spread" },
+                            h("span", { class: "eyebrow", text: P.t("public.eyebrow") }),
+                            h("span", { class: "badge" }, P.icon("globe"), P.t("list.public"))),
+                        h("h1", { text: wishlist.name, tabIndex: -1 }),
+                        wishlist.description ? h("p", { class: "muted pre", text: wishlist.description }) : null,
+                        h("div", { class: "list-meta" },
+                            h("span", null, P.icon("user"), P.t("list.by", { name: P.displayName(wishlist.owner) })),
+                            expiry ? h("span", null, P.icon("calendar"), expiry) : null)),
+                    banner,
+                    board.el);
+                board.update(wishlist.wishes || []);
+
+                // Whoever can open the list in the app does their claiming there.
+                if (user) {
+                    P.api("GET", "auth/wishlists/" + encodeURIComponent(wishlist.id)).then(function () {
+                        P.mount(banner, h("div", { class: "notice row spread" },
+                            h("span", { text: P.t("public.haveAccess") }),
+                            h("a", { class: "btn small primary", href: "/wishlists/" + encodeURIComponent(wishlist.id), text: P.t("public.openInApp") })));
+                    }, function () {
+                        // No access beyond the public link: nothing to offer.
+                    });
+                } else if (wishlist.claimable) {
+                    P.mount(banner, h("p", { class: "notice", text: P.t("public.signInHint") }));
+                }
+            }, function (err) {
+                P.mount(main, P.emptyState(err.status === 400 ? P.t("public.notFound") : err.message, h("a", { class: "btn", href: "/", text: P.t("nav.home") })));
+            });
         }
-
-        showAdminMenu(admin)
-
-    } else {
-        var email = ""
-        var first_name = ""
-        var last_name = ""
-    }
-
-    try {
-        string_index = document.URL.lastIndexOf('/');
-        wishlist_hash = document.URL.substring(string_index+1);
-    }
-    catch {
-        wishlist_hash = 0
-    }
-
-    var html = `
-        <!-- The Modal -->
-        <div id="myModal" class="modal">
-            <span class="close clickable">&times;</span>
-            <img class="modal-content" id="modal-img" src="/assets/loading.gif">
-            <div id="caption"></div>
-        </div>
-
-        <div class="" id="front-page">
-            
-            <div class="module">
-            
-                <div class="wishlist-info" id="wishlist-info-box">
-
-                    <div class="loading-icon-wrapper" id="loading-icon-wrapper-wishlist">
-                        <img class="loading-icon" src="/assets/loading.svg">
-                    </div>
-
-                    <div id="wishlist-title" class="title">
-                    </div>
-
-                    <div class="text-body" id="wishlist-description">
-                    </div>
-
-                    <div class="text-body" id="wishlist-info">
-                    </div>
-
-                </div>
-
-            </div>
-
-            <div class="module">
-
-                <div id="wishlists-title" class="title">
-                    Wishes:
-                </div>
-
-                <div id="wish-sort-controls" class="wish-sort-controls"></div>
-
-                <div id="wishes-box" class="wishes">
-                    <div class="loading-icon-wrapper" id="loading-icon-wrapper">
-                        <img class="loading-icon" src="/assets/loading.svg">
-                    </div>
-                </div>
-
-            </div>
-
-        </div>
-    `;
-
-    document.getElementById('content').innerHTML = html;
-    document.getElementById('card-header').innerHTML = 'A wishlist shared with you!';
-    clearResponse();
-
-    if(result !== false) {
-        showLoggedInMenu();
-    } else {
-        showLoggedOutMenu();
-    }
-
-    getPublicWishlist(wishlist_hash);
-}
-
-function getPublicWishlist(wishlist_hash){
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                console.log(result);
-
-                currency = result.currency;
-                currency_padding = result.padding;
-                
-                placeWishlist(result.wishlist);
-                placeWishes(result.wishlist.wishes)
-
-            }
-
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "open/wishlists/public/" + wishlist_hash);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function placeWishlist(wishlist_object) {
-
-    try {
-        document.getElementById("loading-icon-wrapper-wishlist").style.display = "none"
-    } catch(e) {
-        console.log("Error: " + e)
-    }
-
-    document.getElementById("wishlist-title").innerHTML = wishlist_object.name
-    document.getElementById("wishlist-description").innerHTML = wishlist_object.description
-    document.getElementById("wishlist-info").innerHTML += "<br>By: " + wishlist_object.owner.first_name + " " + wishlist_object.owner.last_name + "."
-
-    try {
-        
-        var expiration = new Date(Date.parse(wishlist_object.date));
-        expiration_string = expiration.toLocaleDateString();
-
-        if(wishlist_object.expires) {
-            document.getElementById("wishlist-info").innerHTML += "<br>Expires: " + expiration_string
-        } else {
-            document.getElementById("wishlist-info").innerHTML += "<br>Does not expire."
-        }
-
-        var box = document.getElementById("wishlist-info-box")
-
-        document.getElementById("wishlist-info-box").innerHTML = box.innerHTML.replace('{wishlist_expiration_date}', wishlist_object.date)
-        document.getElementById("wishlist-info-box").innerHTML = box.innerHTML.replace('{wishlist_expires}', wishlist_object.expires)
-
-        if(wishlist_object.claimable) {
-            document.getElementById("wishlist-info").innerHTML += "<br>Wishes are claimable.";
-            box = document.getElementById("wishlist-info-box")
-            document.getElementById("wishlist-info-box").innerHTML = box.innerHTML.replace('{wishlist_claimable}', "true");
-        } else {
-            document.getElementById("wishlist-info").innerHTML += "<br>Wishes are not claimable.";
-            box = document.getElementById("wishlist-info-box")
-            document.getElementById("wishlist-info-box").innerHTML = box.innerHTML.replace('{wishlist_claimable}', "false");
-        }
-
-        if(wishlist_object.public) {
-            document.getElementById("wishlist-info").innerHTML += "<br>Wishlist is public to users without accounts.";
-            box = document.getElementById("wishlist-info-box")
-            document.getElementById("wishlist-info-box").innerHTML = box.innerHTML.replace('{wishlist_public}', "true");
-        } else {
-            document.getElementById("wishlist-info").innerHTML += "<br>Wishlist is private to shared groups.";
-            box = document.getElementById("wishlist-info-box")
-            document.getElementById("wishlist-info-box").innerHTML = box.innerHTML.replace('{wishlist_public}', "false");
-        }
-
-    } catch(err) {
-        console.log("Failed to parse datetime. Error: " + err)
-    }
-
-}
-
-// Cache of the last rendered wishes and their render arguments, so the sort
-// controls can re-render without re-fetching from the API.
-var lastWishes = [];
-var lastWishlistId = null;
-var lastGroupId = null;
-var lastUserId = null;
-
-// Called by the shared sort controls (categoryFunctions.js) after a change.
-function rerenderWishes() {
-    placeWishes(lastWishes, lastWishlistId, lastGroupId, lastUserId);
-}
-
-function placeWishes(wishes_array, wishlist_id, group_id, user_id) {
-
-    lastWishes = wishes_array;
-    lastWishlistId = wishlist_id;
-    lastGroupId = group_id;
-    lastUserId = user_id;
-    renderSortControls(wishes_array);
-
-    var wish_id_array = []
-
-    // Category grouping helpers live in categoryFunctions.js (shared, read-only
-    // safe). This page keeps its own generate_wish_html call signature.
-    function renderWishList(list) {
-        var listHTML = '';
-        for(var j = 0; j < list.length; j++) {
-            var function_result = generate_wish_html(list[j], wishlist_id, group_id, user_id);
-            listHTML += function_result[0];
-            if(function_result[1]) {
-                wish_id_array.push(list[j].id);
-            }
-        }
-        return listHTML;
-    }
-
-    var html = placeWishesGrouped(wishes_array, renderWishList);
-
-    if(wishes_array.length == 0) {
-        info("Looks like this wishlist is empty...");
-
-        try {
-            document.getElementById("loading-icon-wrapper").style.display = "none"
-        } catch(e) {
-            console.log("Error: " + e)
-        }
-    }
-
-    wishlist_object = document.getElementById("wishes-box")
-    wishlist_object.innerHTML = html
-
-    if(wish_id_array.length > 0) {
-        for(var i = 0; i < wish_id_array.length; i++) {
-            GetWishImageThumbail(wish_id_array[i])
-        }
-    }
-
-}
-
-function generate_wish_html(wish_object, wishlist_id, group_id, user_id) {
-    var html = '';
-    var wish_with_image = false;
-
-    var owner_id = wish_object.owner_id.id
-    var wishlist_ownerID = wish_object.wishlist_owner.id
-
-    var collaborator = false;
-    for(var i = 0; i < wish_object.collaborators.length; i++) {
-        if(wish_object.collaborators[i].user.id == user_id) {
-            collaborator = true;
-            break;
-        }
-    }
-
-    if(wish_object.wishclaim.length > 0 && user_id != owner_id && !collaborator && wish_object.wish_claimable) {
-        var transparent = " transparent"
-    } else {
-        var transparent = ""
-    }
-
-    html += '<div class="wish-wrapper ' + transparent + '" id="wish_wrapper_' + wish_object.id + '">'
-
-    html += '<div class="wish" id="wish_' + wish_object.id + '">'
-    
-    html += '<div class="wish-title">'
-    html += '<div class="profile-icon">'
-    html += '<img class="icon-img " src="/assets/gift.svg">'
-    html += '</div>'
-
-    html += '<span class="wish-title-text">' + wish_object.name + '</span>'
-
-    if(wish_object.price != 0) {
-
-        var currency_string = currency
-        if(currency_padding) {
-            currency_string = " " + currency_string;
-        }
-
-        html += '<div class="wish-price unselectable" title="Price">'
-        html += wish_object.price + currency_string
-        html += '</div>'
-    }
-
-    html += '</div>'
-
-    html += '<div class="profile">'
-
-    if(wish_object.note !== "" || wish_object.image) {
-        html += `<div class="profile-icon clickable" onclick="toggle_wish('${wish_object.id}')" title="Expandable">`;
-
-        if(wish_object.image) {
-            html += '<img id="wish_' + wish_object.id + '_arrow" class="icon-img " src="/assets/chevron-down.svg">'
-        } else {
-            html += '<img id="wish_' + wish_object.id + '_arrow" class="icon-img " src="/assets/chevron-right.svg">'
-        }
-
-        html += '</div>'
-    }
-
-    if(wish_object.url !== "") {
-        html += `<div class="profile-icon clickable" onclick="window.open('${wish_object.url}', \'_blank\')" title="Go to webpage">`
-        html += '<img class="icon-img " src="/assets/link.svg">'
-        html += '</div>'
-    }
-
-    if(user_id == owner_id || collaborator || user_id == wishlist_ownerID) {
-
-        var b64_wish_name = toBASE64(wish_object.name)
-        var b64_wish_note = toBASE64(wish_object.note)
-        var b64_wish_url = toBASE64(wish_object.url)
-        var b64_wish_price = toBASE64(wish_object.price.toString())
-
-        html += `<div class="profile-icon clickable" title="Edit wish" onclick="edit_wish('${wish_object.id}', '${wishlist_id}', '${group_id}', '${user_id}', '${b64_wish_name}', '${b64_wish_note}', '${b64_wish_url}', '${b64_wish_price}', '${owner_id}')">`;
-        html += '<img class="icon-img " src="/assets/edit.svg">'
-        html += '</div>'
-
-        html += `<div class="profile-icon clickable" title="Delete wish" onclick="delete_wish('${wish_object.id}', '${wishlist_id}', '${group_id}', '${user_id}')">`;
-        html += '<img class="icon-img " src="/assets/trash-2.svg">'
-        html += '</div>'
-    } else if(wish_object.wishclaim.length > 0 && wish_object.wish_claimable) {
-        for(var j = 0; j < wish_object.wishclaim.length; j++) {
-            if(user_id !== wish_object.wishclaim[j].user.id) {
-                html += '<div class="profile-icon" title="Claimed by ' + wish_object.wishclaim[j].user.first_name + ' ' + wish_object.wishclaim[j].user.last_name + '">'
-                html += '<img class="icon-img " src="/assets/lock.svg">'
-                html += '</div>'
-            } else {
-                html += '<div class="profile-icon clickable" title="Claimed by you, click to unclaim.">'
-                html += `<img class="icon-img " src="/assets/unlock.svg" onclick="unclaim_wish('${wish_object.id}', '${wishlist_id}', '${group_id}', '${user_id}')")>`;
-                html += '</div>'
-            }
-        }
-    } else if(wish_object.wish_claimable) {
-        html += `<div class="profile-icon clickable" title="Claim this gift" onclick="claim_wish('${wish_object.id}', '${wishlist_id}', '${group_id}', '${user_id}')">`;
-        html += '<img class="icon-img " src="/assets/check.svg">'
-        html += '</div>'
-    }
-    html += '</div>'
-
-    html += '</div>'
-
-    if(wish_object.image) {
-        var imageOnlyClass = wish_object.note === "" ? " image-only" : "";
-        html += '<div class="wish-note expanded' + imageOnlyClass + '" style="display: grid !important;" id="wish_' + wish_object.id + '_note" title="Note">'
-    } else {
-        html += '<div class="wish-note collapsed" id="wish_' + wish_object.id + '_note" title="Note">'
-    }
-
-    if(wish_object.image) {
-        html += `<div class="wish-image-thumbnail clickable" onclick="toggle_wish_modal('${wish_object.id}')">`;
-        html += '<img style="width: 100%; height: 100%;" class="wish-image-thumbnail-img" id="wish-image-thumbnail-img-' + wish_object.id  + '" src="/assets/loading.gif">'
-        html += '</div>'
-
-        wish_with_image = true
-    }
-
-    html += '<div class="wish-note-text">'
-    html += wish_object.note
-    html += '</div>'
-
-    html += '</div>'
-
-    html += '</div>'
-
-    return [html, wish_with_image];
-
-}
-
-function toggle_wish(wishid) {
-    wishnote = document.getElementById("wish_" + wishid + "_note");
-    wishnotearrow = document.getElementById("wish_" + wishid + "_arrow");
-
-    if(wishnote.classList.contains("collapsed")) {
-        wishnote.classList.remove("collapsed")
-        wishnote.classList.add("expanded")
-        wishnote.style.display = "grid"
-        wishnotearrow.src = "/assets/chevron-down.svg"
-    } else {
-        wishnote.classList.remove("expanded")
-        wishnote.classList.add("collapsed")
-        wishnote.style.display = "none"
-        wishnotearrow.src = "/assets/chevron-right.svg"
-    }
-}
-
-function toggle_wish_modal(wishID) {
-
-    document.getElementById("myModal").style.display = "block";
-    GetWishImage(wishID);
-
-}
-
-function GetWishImage(wishID) {
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-
-                // Disable modal
-                document.getElementById("myModal").style.display = "none";
-
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-                document.getElementById("myModal").style.display = "none";
-
-            } else {
-
-                PlaceWishImageInModal(result.image)
-                
-            }
-
-        } else {
-            // info("Loading week...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "both/wishes/" + wishID + "/image");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-
-    return;
-
-}
-
-function PlaceWishImageInModal(imageBase64) {
-
-    document.getElementById("modal-img").src = imageBase64
-
-}
-
-function GetWishImageThumbail(wishID) {
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                PlaceWishImageThumbail(result.image, wishID)
-                
-            }
-
-        } else {
-            // info("Loading week...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "both/wishes/" + wishID + "/image?thumbnail=true");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-
-    return;
-
-}
-
-function PlaceWishImageThumbail(imageBase64, wishID) {
-
-    document.getElementById("wish-image-thumbnail-img-" + wishID).src = imageBase64
-
-}
+    });
+})();
