@@ -145,7 +145,9 @@ Behind a reverse proxy (Traefik, Caddy, nginx, ...), every connection comes from
 
 ### Security headers
 
-Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` (links to shops never carry a public wishlist link or a reset code in their `Referer`), and `X-Frame-Options: DENY` with `Content-Security-Policy: frame-ancestors 'none'`, so no other site can frame Pønskelisten, for instance to trick a click on the consent page. Embedding it in a dashboard iframe isn't possible as a result.
+Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` (links to shops never carry a public wishlist link or a reset code in their `Referer`), and `X-Frame-Options: DENY`, so no other site can frame Pønskelisten, for instance to trick a click on the consent page. Embedding it in a dashboard iframe isn't possible as a result.
+
+A strict `Content-Security-Policy` lets pages run only the scripts and styles the app serves itself and load images from it or from `data:` URLs; nothing comes from another site, and `frame-ancestors 'none'` repeats the framing ban. A reverse proxy that injects scripts or styles into pages (analytics, banners) will see them blocked.
 
 ### Rate limits
 
