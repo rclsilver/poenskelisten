@@ -36,12 +36,18 @@ func main() {
 	utilities.PrintASCII()
 	gin.SetMode(gin.ReleaseMode)
 
-	// Create files directory
+	// Create files directory. It holds secrets (config.json, the SQLite
+	// database), so it is kept to the app's own user, older installs included.
 	newPath := filepath.Join(".", "files")
-	err := os.MkdirAll(newPath, os.ModePerm)
+	err := os.MkdirAll(newPath, config.OwnerOnlyDirMode)
 	if err != nil {
 		fmt.Println("failed to create 'files' directory. error: " + err.Error())
 		os.Exit(1)
+	}
+	if changed, err := config.RestrictPermissions(newPath, config.OwnerOnlyDirMode); err != nil {
+		fmt.Println("warning: 'files' directory may be readable by other users, and restricting it failed. error: " + err.Error())
+	} else if changed {
+		fmt.Println("directory 'files' was readable by other users; restricted it to its owner.")
 	}
 	fmt.Println("directory 'files' valid")
 

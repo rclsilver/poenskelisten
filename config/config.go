@@ -31,6 +31,10 @@ func LoadConfig() (err error) {
 		}
 	}
 
+	// Existing installs may have a world-readable file; fix it on every start,
+	// not only when something is saved.
+	restrictConfigFile()
+
 	file, err := os.Open(configFilePath)
 	if err != nil {
 		fmt.Println("load config file threw error trying to open the file")
@@ -237,13 +241,54 @@ func SaveConfig() error {
 		return errors.New("failed to marshal config file")
 	}
 
-	err = os.WriteFile(configFilePath, file, 0644)
+	err = os.WriteFile(configFilePath, file, ownerOnlyFileMode)
 	if err != nil {
 		fmt.Println("failed to save config file to disk. error: " + err.Error())
 		return errors.New("failed to save config file to disk")
 	}
 
+	// os.WriteFile only applies the mode when it creates the file.
+	restrictConfigFile()
+
 	return nil
+}
+
+const (
+	// ownerOnlyFileMode is for files holding secrets: config.json carries the
+	// token signing keys and any database, SMTP and OIDC passwords.
+	ownerOnlyFileMode os.FileMode = 0600
+	// OwnerOnlyDirMode is for the files/ directory, which holds config.json,
+	// the log and, with SQLite, the database with every password hash.
+	OwnerOnlyDirMode os.FileMode = 0700
+)
+
+// RestrictPermissions removes the permission bits of path that mode doesn't
+// grant (it never adds any), and reports whether it had to change anything.
+func RestrictPermissions(path string, mode os.FileMode) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	current := info.Mode().Perm()
+	if current&^mode == 0 {
+		return false, nil
+	}
+	if err := os.Chmod(path, current&mode); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// restrictConfigFile tightens config.json to its owner, fixing files written
+// by older versions as 0644. A failure (say, the file belongs to another user)
+// is reported but isn't fatal: the instance ran like this before.
+func restrictConfigFile() {
+	changed, err := RestrictPermissions(configFilePath, ownerOnlyFileMode)
+	if err != nil {
+		fmt.Println("warning: config.json may be readable by other users, and restricting it failed. error: " + err.Error())
+	} else if changed {
+		fmt.Println("config.json was readable by other users; restricted it to its owner.")
+	}
 }
 
 // GetPrivateKey returns the decoded JWT signing secret. It fails loudly rather
