@@ -46,8 +46,16 @@ var OAUTH_CLIENT_ID = "poenskelisten-web";
 // are refused by the API.
 var LOCAL_LOGIN_ENABLED = {{.localLoginEnabled}};
 var OIDC_PROVIDER_NAME = {{.oidcProviderNameJSON}};
+// Absolute and on external_url even when this page was opened on one of the
+// additional URLs: the IdP only ever returns to external_url, and the flow's
+// state cookie has to be set on that same origin.
+var OIDC_LOGIN_URL = {{.oidcLoginURLJSON}};
 var oauth_base = window.location.origin + "/oauth/";
 var sessionRefreshTimer = null;
+var sessionRefreshActive = false;
+// Seconds, from the last token response's expires_in; the server's lifetime is
+// configurable (access_token_minutes), so this is only the initial guess.
+var accessTokenLifetime = 15 * 60;
 
 // base64url without padding (for PKCE + state).
 function base64UrlEncode(bytes) {
@@ -179,6 +187,9 @@ function postTokenRequest(body) {
             return null;
         }
         return response.json().then(function(result) {
+            if(result && result.expires_in > 0) {
+                accessTokenLifetime = result.expires_in;
+            }
             return result && result.access_token ? result.access_token : null;
         }, function() {
             return null;
@@ -240,17 +251,39 @@ function refreshAccessToken() {
         }
         set_cookie("poenskelisten", accessToken, 7);
         P.token = accessToken;
+        if(sessionRefreshActive) {
+            scheduleSessionRefresh();
+        }
         return true;
     });
 }
 
-// Access tokens are short-lived (~15 min), so roll them on a timer while a tab is
-// open to keep an active session alive between reloads.
+// Access tokens are short-lived, so roll them on a timer while a tab is open to
+// keep an active session alive between reloads.
 function startSessionRefreshTimer() {
-    if(sessionRefreshTimer !== null) {
+    if(sessionRefreshActive) {
         return;
     }
-    sessionRefreshTimer = setInterval(refreshAccessToken, 10 * 60 * 1000);
+    sessionRefreshActive = true;
+    scheduleSessionRefresh();
+}
+
+// Refresh at two thirds of the access token's lifetime, leaving room for a slow
+// request before it expires. A successful refresh schedules the next one; a
+// failed one (e.g. a network blip) is retried after the same delay.
+function scheduleSessionRefresh() {
+    if(sessionRefreshTimer !== null) {
+        clearTimeout(sessionRefreshTimer);
+    }
+    var delaySeconds = Math.max(30, Math.floor(accessTokenLifetime * 2 / 3));
+    sessionRefreshTimer = setTimeout(function() {
+        sessionRefreshTimer = null;
+        refreshAccessToken().then(function(refreshed) {
+            if(!refreshed) {
+                scheduleSessionRefresh();
+            }
+        });
+    }, delaySeconds * 1000);
 }
 
 // An API call answered 401: the token expired between two refreshes. Try once

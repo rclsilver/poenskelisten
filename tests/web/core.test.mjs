@@ -1,4 +1,4 @@
-// Unit tests for web/js/core.js. Run with: node --test tests/web/
+// Unit tests for web/js/core.js. Run with: node --test tests/web/*.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadCore, memoryStorage } from "./harness.mjs";
