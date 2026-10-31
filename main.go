@@ -78,6 +78,18 @@ func main() {
 		logger.Log.Warn("ignoring invalid entry in poenskelisten_additional_urls: " + err.Error())
 	}
 	logger.Log.Info("login allowed from: " + strings.Join(config.AllowedOrigins(), ", "))
+	// Unlike a bad login origin, a bad proxy list can't be skipped entry by
+	// entry: it decides which addresses rate limits apply to.
+	trustedProxies, err := config.ParseTrustedProxies(config.ConfigFile.PoenskelistenTrustedProxies)
+	if err != nil {
+		logger.Log.Error("invalid poenskelisten_trusted_proxies. error: " + err.Error())
+		os.Exit(1)
+	}
+	if len(trustedProxies) == 0 {
+		logger.Log.Info("no trusted proxies: client addresses are taken from the connection, and X-Forwarded-For is ignored")
+	} else {
+		logger.Log.Info("trusting X-Forwarded-For from: " + strings.Join(trustedProxies, ", "))
+	}
 	if strings.TrimSpace(config.ConfigFile.PoenskelistenExternalURL) == "" {
 		logger.Log.Warn("externalurl is not set, so " + config.OAuthIssuer() + " is used for links, single sign-on and as the main login address. Set externalurl to the address users open Pønskelisten on, and additionalurls for any others.")
 	}
@@ -146,6 +158,17 @@ func main() {
 
 func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	router := gin.Default()
+
+	// Only the configured reverse proxies may set the client address with
+	// X-Forwarded-For or X-Real-IP. Gin trusts every peer by default, which let
+	// any client choose the address its rate limits are counted against.
+	// main() has already refused an invalid list; trust nobody if one gets here.
+	if proxies, proxyErr := config.ParseTrustedProxies(configFile.PoenskelistenTrustedProxies); proxyErr != nil || router.SetTrustedProxies(proxies) != nil {
+		logger.Log.Error("invalid trusted proxy list; trusting no proxy")
+		_ = router.SetTrustedProxies(nil)
+	}
+	router.Use(middlewares.WarnUntrustedForwardedFor())
+
 	// Routes whose JSON body can carry a base64 image get a raised limit.
 	router.Use(middlewares.MaxBodySize(middlewares.DefaultMaxBodyBytes, map[string]int64{
 		"/api/auth/wishes":          middlewares.ImageUploadMaxBodyBytes,
@@ -429,6 +452,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 	var port = flag.Int("port", configFile.PoenskelistenPort, "The port Pønskelisten is listening on.")
 	var externalURL = flag.String("externalurl", configFile.PoenskelistenExternalURL, "The URL others would use to access Pønskelisten.")
 	var additionalURLs = flag.String("additionalurls", configFile.PoenskelistenAdditionalURLs, "Comma-separated extra URLs Pønskelisten can be logged in from, e.g. a LAN address.")
+	var trustedProxies = flag.String("trustedproxies", configFile.PoenskelistenTrustedProxies, "Comma-separated IP addresses or CIDR ranges of reverse proxies whose X-Forwarded-For header is trusted for the client address.")
 	var timezone = flag.String("timezone", configFile.Timezone, "The timezone Pønskelisten is running in.")
 	var environment = flag.String("environment", configFile.PoenskelistenEnvironment, "The environment Pønskelisten is running in. It will behave differently in 'test'.")
 	var testemail = flag.String("testemail", configFile.PoenskelistenTestEmail, "The email all emails are sent to in test mode.")
@@ -512,6 +536,14 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 			return configFile, actions, flagsProvided, errors.New("invalid -additionalurls value: " + err.Error())
 		}
 		configFile.PoenskelistenAdditionalURLs = strings.Join(origins, ",")
+	}
+
+	if provided["trustedproxies"] {
+		proxies, err := config.ParseTrustedProxies(*trustedProxies)
+		if err != nil {
+			return configFile, actions, flagsProvided, errors.New("invalid -trustedproxies value: " + err.Error())
+		}
+		configFile.PoenskelistenTrustedProxies = strings.Join(proxies, ",")
 	}
 
 	if provided["timezone"] {

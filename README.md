@@ -87,6 +87,7 @@ You can configure Pønskelisten in **three different ways**:
 | poenskelisten_port | port | port | int | Port to run on (default: `8080`) |
 | poenskelisten_external_url | externalurl | externalurl | string | **Required.** The main URL users open in their browser, e.g. `https://wishlist.example.com`. Used for login, e-mail links, public wishlist links, single sign-on and as the OAuth issuer. If unset, only `http://localhost:<port>` can log in. |
 | poenskelisten_additional_urls | additionalurls | additionalurls | string | Comma-separated extra URLs users can log in from, e.g. `http://192.168.1.10:8080,http://wishlist.lan`. Each must be just scheme, host and port. Links and single sign-on still use `external_url`. |
+| poenskelisten_trusted_proxies | trustedproxies | trustedproxies | string | Comma-separated IP addresses or CIDR ranges of your reverse proxies, e.g. `172.18.0.0/16` or `10.244.0.0/16`. Only requests coming from these may give the visitor's address with `X-Forwarded-For`/`X-Real-IP`; anyone else's headers are ignored. Default: none, so the address of the connection is used. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 | poenskelisten_environment | environment | environment | string | `production` or `test` |
 | poenskelisten_test_email | testemail | testemail | string | E-mail destination when in `test` |
 | poenskelisten_name | name | name | string | Display name of the app |
@@ -133,6 +134,10 @@ Pønskelisten keeps its state in `files/` (config, log and, with SQLite, the dat
 - `config.json` is created on the first run. Values given as startup flags or environment variables are **written back into it** whenever they differ from what's there, so it's always the full picture of your configuration.
 - It holds secrets: the auto-generated `oauth_signing_key` and `private_key`, plus any database, SMTP and OIDC passwords you configure, including ones passed as environment variables. Treat it as sensitive. Pønskelisten creates `config.json` and its log readable by its own user only (`0600`) and keeps `files/` closed to other users (`0700`); on every start it tightens `config.json` and `files/` if an older version left them readable. A backup job that reads the folder as a different, non-root user needs to run as the app's user instead.
 - Keep the signing keys. If `config.json` is lost or replaced, new keys are generated: everyone is logged out, and connected apps (MCP clients) have to be authorised again.
+
+### Behind a reverse proxy
+
+Behind a reverse proxy (Traefik, Caddy, nginx, ...), every connection comes from the proxy, which passes the visitor's address in `X-Forwarded-For`. Pønskelisten only believes that header from the proxies listed in `trustedproxies`, since any client can send it. Set it to your proxy's address or network, e.g. `trustedproxies=172.18.0.0/16` for a proxy on a Docker network, or the pod network (e.g. `10.244.0.0/16`) on Kubernetes. Without it, every visitor is seen with the proxy's address, which shows in session lists and makes everyone share the same rate limits; a warning is logged once when that happens. Your proxy must overwrite or append to `X-Forwarded-For`, not pass a client's own value through untouched (Traefik, Caddy and nginx's `$proxy_add_x_forwarded_for` all do).
 
 ---
 

@@ -154,6 +154,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		"-port", "9001",
 		"-externalurl", "https://wish.example.com",
 		"-additionalurls", "http://192.168.1.10:8080/, HTTP://Wish.LAN",
+		"-trustedproxies", "10.244.1.1/16, 127.0.0.1",
 		"-timezone", "Europe/Oslo",
 		"-environment", "test",
 		"-testemail", "test@example.com",
@@ -205,6 +206,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		PoenskelistenPort:           9001,
 		PoenskelistenExternalURL:    "https://wish.example.com",
 		PoenskelistenAdditionalURLs: "http://192.168.1.10:8080,http://wish.lan",
+		PoenskelistenTrustedProxies: "10.244.0.0/16,127.0.0.1",
 		Timezone:                    "Europe/Oslo",
 		PoenskelistenEnvironment:    "test",
 		PoenskelistenTestEmail:      "test@example.com",
@@ -640,5 +642,60 @@ func TestInitRouterEscapesAppText(t *testing.T) {
 	}
 	if manifest.Name != name || manifest.Description != name {
 		t.Errorf("manifest.json name/description = %q, %q; want %q", manifest.Name, manifest.Description, name)
+	}
+}
+
+func TestParseFlagsInvalidTrustedProxiesFails(t *testing.T) {
+	withArgs(t, "-trustedproxies", "10.0.0.1,traefik")
+
+	_, _, _, err := parseFlags(models.ConfigStruct{PoenskelistenTrustedProxies: "10.0.0.1"})
+	if err == nil || !strings.Contains(err.Error(), "trustedproxies") {
+		t.Errorf("parseFlags error = %v, want an invalid -trustedproxies error", err)
+	}
+}
+
+// clientIPAs returns the client address the router sees for a request from
+// remoteAddr carrying the given X-Forwarded-For header.
+func clientIPAs(router *gin.Engine, remoteAddr string, forwardedFor string) string {
+	w := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/test-client-ip", nil)
+	request.RemoteAddr = remoteAddr
+	if forwardedFor != "" {
+		request.Header.Set("X-Forwarded-For", forwardedFor)
+		request.Header.Set("X-Real-IP", "192.0.2.99")
+	}
+	router.ServeHTTP(w, request)
+	return w.Body.String()
+}
+
+func TestInitRouterClientIPHonorsOnlyTrustedProxies(t *testing.T) {
+	echo := func(ctx *gin.Context) { ctx.String(http.StatusOK, ctx.ClientIP()) }
+
+	untrusting := initRouter(models.ConfigStruct{})
+	untrusting.GET("/test-client-ip", echo)
+	trusting := initRouter(models.ConfigStruct{PoenskelistenTrustedProxies: "10.244.0.0/16"})
+	trusting.GET("/test-client-ip", echo)
+
+	cases := []struct {
+		name       string
+		router     *gin.Engine
+		remoteAddr string
+		forwarded  string
+		want       string
+	}{
+		{"no proxy trusted: header ignored", untrusting, "10.244.1.5:4000", "203.0.113.7", "10.244.1.5"},
+		{"no header: peer address", trusting, "10.244.1.5:4000", "", "10.244.1.5"},
+		{"trusted proxy: forwarded client", trusting, "10.244.1.5:4000", "203.0.113.7", "203.0.113.7"},
+		{"untrusted peer: header ignored", trusting, "198.51.100.9:4000", "203.0.113.7", "198.51.100.9"},
+		// A proxy appends the address it saw, so entries a client wrote itself
+		// sit to the left of it and are never reached.
+		{"spoofed entries before the real one", trusting, "10.244.1.5:4000", "1.1.1.1, 203.0.113.7", "203.0.113.7"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := clientIPAs(c.router, c.remoteAddr, c.forwarded); got != c.want {
+				t.Errorf("client IP = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
