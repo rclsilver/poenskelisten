@@ -37,6 +37,9 @@ type ConfigStruct struct {
 	OAuthSigningKey             string `json:"oauth_signing_key"`
 	OAuthSigningKeyID           string `json:"oauth_signing_key_id"`
 	MCPEnabled                  bool   `json:"mcp_enabled"`
+	RateLimitLogin              string `json:"rate_limit_login"`
+	RateLimitOAuth              string `json:"rate_limit_oauth"`
+	RateLimitRegister           string `json:"rate_limit_register"`
 	SMTPEnabled                 bool   `json:"smtp_enabled"`
 	SMTPHost                    string `json:"smtp_host"`
 	SMTPPort                    int    `json:"smtp_port"`

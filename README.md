@@ -112,6 +112,9 @@ You can configure Pønskelisten in **three different ways**:
 | smtp_password | smtppassword | smtppassword | string | SMTP password |
 | smtp_from | smtpfrom | smtpfrom | string | Sender email address |
 | mfa_enforced | mfaenforced | mfaenforced | bool | Require all local users to enroll in MFA (TOTP) |
+| rate_limit_login | ratelimitlogin | ratelimitlogin | string | Requests per visitor address, shared by login, the MFA step, registration, password reset and e-mail verification (and the password checks on the account page), as `<requests>/<duration>`, or `off`. Default `20/15m`. See [Rate limits](#rate-limits) |
+| rate_limit_oauth | ratelimitoauth | ratelimitoauth | string | Requests per visitor address, shared by `/oauth/authorize`, `/oauth/consent`, `/oauth/token` and `/oauth/revoke`, or `off`. Default `60/1m` |
+| rate_limit_register | ratelimitregister | ratelimitregister | string | App registrations (`/oauth/register`) per visitor address, or `off`. Default `10/1h` |
 | mfa_recovery_codes_enabled | mfarecoverycodes | mfarecoverycodes | bool | Issue single-use recovery codes on MFA enrollment (default off; when off, an admin must remove MFA for locked-out users) |
 | oidc_enabled | oidcenabled | oidcenabled | bool | Enable OpenID Connect single sign-on |
 | oidc_provider_name | oidcprovidername | oidcprovidername | string | Display name on the SSO login button (e.g. "Authelia") |
@@ -138,6 +141,16 @@ Pønskelisten keeps its state in `files/` (config, log and, with SQLite, the dat
 ### Behind a reverse proxy
 
 Behind a reverse proxy (Traefik, Caddy, nginx, ...), every connection comes from the proxy, which passes the visitor's address in `X-Forwarded-For`. Pønskelisten only believes that header from the proxies listed in `trustedproxies`, since any client can send it. Set it to your proxy's address or network, e.g. `trustedproxies=172.18.0.0/16` for a proxy on a Docker network, or the pod network (e.g. `10.244.0.0/16`) on Kubernetes. Without it, every visitor is seen with the proxy's address, which shows in session lists and makes everyone share the same rate limits; a warning is logged once when that happens. Your proxy must overwrite or append to `X-Forwarded-For`, not pass a client's own value through untouched (Traefik, Caddy and nginx's `$proxy_add_x_forwarded_for` all do).
+
+### Rate limits
+
+Password and code checks are rate-limited per visitor address (IPv6 addresses are grouped by `/64`), with a sliding window. Requests over a limit get `429 Too Many Requests` and a `Retry-After` header, and the first refusal per address and window is logged as a warning.
+
+- `rate_limit_login` (default `20/15m`): login, the MFA step, registration, password reset and e-mail verification share one budget. Logging in with MFA takes two requests.
+- `rate_limit_oauth` (default `60/1m`): the OAuth endpoints used by the web app and connected apps. An open tab refreshes its token every ten minutes.
+- `rate_limit_register` (default `10/1h`): registration of new connected apps (MCP clients register once, when you connect them).
+
+Write a limit as `<requests>/<duration>` (durations like `30s`, `15m`, `1h`), or `off` to turn it off. The counters live in memory and start over on a restart. Behind a reverse proxy, set [`trustedproxies`](#behind-a-reverse-proxy) first, or all your visitors share one budget.
 
 ---
 

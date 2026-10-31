@@ -37,6 +37,9 @@ argCount=$#
 # Add security-related flags if those environment variables are set
 [ -n "$mfaenforced" ] && set -- "$@" --mfaenforced "$mfaenforced"
 [ -n "$mfarecoverycodes" ] && set -- "$@" --mfarecoverycodes "$mfarecoverycodes"
+[ -n "$ratelimitlogin" ] && set -- "$@" --ratelimitlogin "$ratelimitlogin"
+[ -n "$ratelimitoauth" ] && set -- "$@" --ratelimitoauth "$ratelimitoauth"
+[ -n "$ratelimitregister" ] && set -- "$@" --ratelimitregister "$ratelimitregister"
 
 # Add OIDC single sign-on flags if those environment variables are set
 [ -n "$oidcenabled" ] && set -- "$@" --oidcenabled "$oidcenabled"

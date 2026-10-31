@@ -186,6 +186,9 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		"-oidcautocreateusers", "true",
 		"-disablelocallogin", "true",
 		"-mcpenabled", "true",
+		"-ratelimitlogin", " 5/1m ",
+		"-ratelimitoauth", "off",
+		"-ratelimitregister", "3/2h",
 		"-generateinvite", "true",
 	)
 	logLevel := logger.Log.GetLevel()
@@ -238,6 +241,9 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		OIDCAutoCreateUsers:         true,
 		LocalLoginDisabled:          true,
 		MCPEnabled:                  true,
+		RateLimitLogin:              "5/1m",
+		RateLimitOAuth:              "off",
+		RateLimitRegister:           "3/2h",
 	}
 	if out != want {
 		t.Errorf("parsed config mismatch:\n got %+v\nwant %+v", out, want)
@@ -697,5 +703,61 @@ func TestInitRouterClientIPHonorsOnlyTrustedProxies(t *testing.T) {
 				t.Errorf("client IP = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestParseFlagsInvalidRateLimitFails(t *testing.T) {
+	withArgs(t, "-ratelimitoauth", "sixty")
+
+	_, _, _, err := parseFlags(models.ConfigStruct{})
+	if err == nil || !strings.Contains(err.Error(), "ratelimitoauth") {
+		t.Errorf("parseFlags error = %v, want an invalid -ratelimitoauth error", err)
+	}
+}
+
+// postFrom sends a POST with the given body from remoteAddr and returns the status.
+func postFrom(router *gin.Engine, path string, remoteAddr string, contentType string, body string) int {
+	w := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	request.RemoteAddr = remoteAddr
+	router.ServeHTTP(w, request)
+	return w.Code
+}
+
+// The password and code entry points share one budget per address, and the
+// OAuth endpoints another. Requests are malformed so the handlers stop before
+// touching the database: the limit runs first either way.
+func TestInitRouterRateLimitsLoginAndOAuth(t *testing.T) {
+	router := initRouter(models.ConfigStruct{RateLimitLogin: "2/1m", RateLimitOAuth: "1/1m"})
+	const client, other = "203.0.113.10:5000", "203.0.113.11:5000"
+	jsonType, formType := "application/json", "application/x-www-form-urlencoded"
+
+	codes := []int{
+		postFrom(router, "/api/open/tokens/register", client, jsonType, "{"),
+		postFrom(router, "/api/open/tokens/mfa", client, jsonType, "{"),
+		postFrom(router, "/api/open/users/reset", client, jsonType, "{"),
+	}
+	if codes[0] == http.StatusTooManyRequests || codes[1] == http.StatusTooManyRequests || codes[2] != http.StatusTooManyRequests {
+		t.Errorf("login, MFA, reset codes = %v, want the third refused with 429", codes)
+	}
+	if code := postFrom(router, "/api/open/tokens/register", other, jsonType, "{"); code == http.StatusTooManyRequests {
+		t.Error("another address shouldn't share the budget")
+	}
+
+	if code := postFrom(router, "/oauth/token", client, formType, "grant_type=nope"); code != http.StatusBadRequest {
+		t.Errorf("first token request = %d, want 400 (unsupported grant)", code)
+	}
+	if code := postFrom(router, "/oauth/revoke", client, formType, ""); code != http.StatusTooManyRequests {
+		t.Errorf("second OAuth request = %d, want 429", code)
+	}
+}
+
+func TestInitRouterRateLimitsCanBeTurnedOff(t *testing.T) {
+	router := initRouter(models.ConfigStruct{RateLimitLogin: "off"})
+	for i := 0; i < 30; i++ {
+		if code := postFrom(router, "/api/open/tokens/register", "203.0.113.12:5000", "application/json", "{"); code == http.StatusTooManyRequests {
+			t.Fatalf("request %d refused with the login limit off", i+1)
+		}
 	}
 }

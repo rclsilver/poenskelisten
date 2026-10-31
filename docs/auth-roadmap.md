@@ -675,8 +675,10 @@ These parts of the plan below were built differently. Open gaps are tracked in
 - **DCR toggle.** There's no separate toggle. Registration (and its
   `registration_endpoint` metadata entry) follows `mcp_enabled`, since
   third-party clients have nothing else to use.
-- **Rate limiting.** Only `/oauth/register` is rate-limited. `/oauth/token` and
-  `/oauth/authorize` aren't.
+- **Rate limiting.** `/oauth/authorize`, `/oauth/consent`, `/oauth/token` and
+  `/oauth/revoke` share one per-address limit, `/oauth/register` has its own,
+  and the password and code entry points (login, MFA, reset) share a third. All
+  three are configurable (`rate_limit_*`); see the README.
 - **Key storage.** The signing key lives in `config.json` (not a separate key
   file), which is kept `0600` inside a `0700` `files/` directory.
 
