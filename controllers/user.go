@@ -217,10 +217,6 @@ func APICurrentUser(context *gin.Context) {
 }
 
 func GetUser(context *gin.Context) {
-
-	// Create user request
-	var user = context.Param("user_id")
-
 	// Get user ID
 	userID, err := middlewares.GetAuthUsername(context.GetHeader("Authorization"))
 	if err != nil {
@@ -238,26 +234,29 @@ func GetUser(context *gin.Context) {
 		return
 	}
 
-	// Parse group id
-	user_id_int, err := uuid.Parse(user)
+	targetID, err := uuid.Parse(context.Param("user_id"))
 	if err != nil {
-		logger.Log.Error("Failed to parse group ID. Error: " + err.Error())
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse group ID."})
+		logger.Log.Error("Failed to parse user ID. Error: " + err.Error())
+		context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse user ID."})
 		context.Abort()
 		return
 	}
 
 	userObject := models.User{}
-	if userID == user_id_int || (requestingUserObject.Admin) {
-		userObject, err = database.GetAllUserInformationAnyState(user_id_int)
+	if userID == targetID || (requestingUserObject.Admin) {
+		userObject, err = database.GetAllUserInformationAnyState(targetID)
 		if err != nil {
 			logger.Log.Error("Failed to get user. Error: " + err.Error())
 			context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user (all)."})
 			context.Abort()
 			return
 		}
+		// The full record is only needed for disabled accounts; it also carries
+		// the password hash and the one-time verification and reset codes,
+		// which neither the user nor an admin should ever receive.
+		userObject = database.RedactUserObject(userObject)
 	} else {
-		userObject, err = database.GetUserInformation(user_id_int)
+		userObject, err = database.GetUserInformation(targetID)
 		if err != nil {
 			logger.Log.Error("Failed to get user. Error: " + err.Error())
 			context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user."})
