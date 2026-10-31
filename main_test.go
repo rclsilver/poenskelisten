@@ -1102,6 +1102,10 @@ func TestFrontendHasNoInlineScript(t *testing.T) {
 			}
 		}
 
+		if strings.HasSuffix(file, "actions.js") {
+			// its comment shows an example, not markup
+			continue
+		}
 		for _, re := range []*regexp.Regexp{actionAttr, actionHelper} {
 			for _, m := range re.FindAllStringSubmatch(src, -1) {
 				used[m[1]] = file
@@ -1546,7 +1550,8 @@ func TestFrontendTranslationKeysExist(t *testing.T) {
 func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 	name := `Ma "liste" <b>&</b>`
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
-	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback"} {
+	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback",
+		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit"} {
 		w := serve(router, http.MethodGet, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s = %d, want 200", path, w.Code)

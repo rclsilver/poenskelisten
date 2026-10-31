@@ -157,6 +157,11 @@ export function memoryStorage() {
 
 // loadCore returns a fresh P from web/js/core.js, with its fake document.
 export function loadCore(options = {}) {
+    return loadScripts(["core.js"], options);
+}
+
+// loadScripts runs web/js files in order in one fresh VM, like a page would.
+export function loadScripts(files, options = {}) {
     const document = new FakeDocument();
     if (options.appName !== undefined) {
         const meta = document.createElement("meta");
@@ -172,11 +177,15 @@ export function loadCore(options = {}) {
         URL,
         Intl,
         setTimeout: () => 0,
+        // API calls never answer: rendering must not wait on them.
+        fetch: () => new Promise(() => {}),
         console
     };
     sandbox.window = sandbox;
     vm.createContext(sandbox);
-    vm.runInContext(fs.readFileSync(path.join(root, "web/js/core.js"), "utf8"), sandbox, { filename: "core.js" });
+    for (const file of files) {
+        vm.runInContext(fs.readFileSync(path.join(root, "web/js", file), "utf8"), sandbox, { filename: file });
+    }
     return { P: sandbox.P, document, sandbox };
 }
 
