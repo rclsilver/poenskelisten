@@ -477,13 +477,12 @@ func renderOriginNotAllowedPage(ctx *gin.Context, redirectURI string) {
 	}
 	issuer := config.OAuthIssuer()
 
-	page := `<!doctype html><html><head><meta charset="utf-8"><title>Can't log in here</title></head><body>` +
-		`<h2>Can't log in from this address</h2>` +
-		`<p>This page was opened on <code>` + htmlEscape(origin) + `</code>, which isn't set up for logging in.</p>` +
-		`<p>Open <a href="` + htmlEscape(issuer) + `/">` + htmlEscape(issuer) + `</a> instead.</p>` +
-		`<p>Administrators: to allow this address, add it to <code>additionalurls</code>` +
-		` (or set <code>externalurl</code> if this is the main address) and restart.</p>` +
-		`</body></html>`
+	page := pageShell("Can't log in here",
+		`<h2>Can't log in from this address</h2>`+
+			`<p>This page was opened on <code>`+htmlEscape(origin)+`</code>, which isn't set up for logging in.</p>`+
+			`<p>Open <a href="`+htmlEscape(issuer)+`/">`+htmlEscape(issuer)+`</a> instead.</p>`+
+			`<p>Administrators: to allow this address, add it to <code>additionalurls</code>`+
+			` (or set <code>externalurl</code> if this is the main address) and restart.</p>`)
 
 	ctx.Data(http.StatusBadRequest, "text/html; charset=utf-8", []byte(page))
 }
@@ -498,21 +497,36 @@ func renderConsentPage(ctx *gin.Context, client models.OAuthClient, scopes []str
 		items.WriteString("<li>" + htmlEscape(desc) + "</li>")
 	}
 
-	page := `<!doctype html><html><head><meta charset="utf-8"><title>Authorize</title></head><body>` +
-		`<h2>` + htmlEscape(client.ClientName) + ` wants to access your account</h2>` +
-		`<ul>` + items.String() + `</ul>` +
-		`<form method="post" action="/oauth/consent">` +
-		hiddenField("client_id", client.ClientID) +
-		hiddenField("redirect_uri", redirectURI) +
-		hiddenField("scope", strings.Join(scopes, " ")) +
-		hiddenField("state", state) +
-		hiddenField("code_challenge", challenge) +
-		hiddenField("resource", resource) +
-		`<button type="submit" name="action" value="allow">Allow</button> ` +
-		`<button type="submit" name="action" value="deny">Deny</button>` +
-		`</form></body></html>`
+	page := pageShell("Authorize",
+		`<h2>`+htmlEscape(client.ClientName)+` wants to access your account</h2>`+
+			`<ul>`+items.String()+`</ul>`+
+			`<form method="post" action="/oauth/consent" class="row">`+
+			hiddenField("client_id", client.ClientID)+
+			hiddenField("redirect_uri", redirectURI)+
+			hiddenField("scope", strings.Join(scopes, " "))+
+			hiddenField("state", state)+
+			hiddenField("code_challenge", challenge)+
+			hiddenField("resource", resource)+
+			`<button type="submit" name="action" value="allow" class="btn primary">Allow</button> `+
+			`<button type="submit" name="action" value="deny" class="btn">Deny</button>`+
+			`</form>`)
 
 	ctx.Data(http.StatusOK, "text/html; charset=utf-8", []byte(page))
+}
+
+// pageShell wraps a page the server writes itself in the app's look: its
+// stylesheet, the saved theme and the application name. body must already be
+// escaped. These pages carry no inline script or style, so the
+// Content-Security-Policy applies to them unchanged.
+func pageShell(title string, body string) string {
+	appName := htmlEscape(config.ConfigFile.PoenskelistenName)
+	return `<!doctype html><html><head><meta charset="utf-8">` +
+		`<meta name="viewport" content="width=device-width, initial-scale=1">` +
+		`<meta name="color-scheme" content="light dark">` +
+		`<title>` + htmlEscape(title) + ` · ` + appName + `</title>` +
+		`<link rel="stylesheet" href="/css/app.css"><script src="/js/theme.js"></script></head><body>` +
+		`<main class="container narrow"><div class="auth-card"><span class="eyebrow">` + appName + `</span>` +
+		body + `</div></main></body></html>`
 }
 
 func redirectAuthError(ctx *gin.Context, redirectURI string, state string, errCode string) {

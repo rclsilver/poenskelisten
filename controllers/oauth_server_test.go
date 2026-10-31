@@ -1427,3 +1427,24 @@ func TestResolveSSOUserAcceptsSessionFromTheRevocationSecond(t *testing.T) {
 		t.Error("a session issued after the marker, in the same second, should be accepted")
 	}
 }
+
+// The pages the server writes itself carry the application name, escaped,
+// and the app's stylesheet, with no inline code for the CSP to block.
+func TestPageShellEscapesAppNameAndHasNoInlineCode(t *testing.T) {
+	restoreConfig(t)
+	config.ConfigFile.PoenskelistenName = `Nos "envies" <b>`
+	page := pageShell("Authorize", "<h2>body</h2>")
+	for _, want := range []string{
+		"<title>Authorize · Nos &quot;envies&quot; &lt;b&gt;</title>",
+		`<span class="eyebrow">Nos &quot;envies&quot; &lt;b&gt;</span>`,
+		`<link rel="stylesheet" href="/css/app.css">`,
+		"<h2>body</h2>",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %q:\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, "<b>") || strings.Contains(page, "<script>") || strings.Contains(page, "style=") {
+		t.Errorf("page has the raw name or inline code:\n%s", page)
+	}
+}
