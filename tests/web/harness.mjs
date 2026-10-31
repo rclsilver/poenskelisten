@@ -68,6 +68,30 @@ class FakeElement extends FakeNode {
         this.listeners = {};
         this.dataset = {};
         this.style = {};
+        this._value = "";
+        this.open = false;
+    }
+    // Form controls: an input starts empty, a select reports its selected
+    // option, like in a browser.
+    get value() {
+        if (this.tagName === "SELECT" && this._value === "") {
+            const options = this.querySelectorAll("option");
+            const chosen = options.find((option) => option.selected) || options[0];
+            return chosen ? String(chosen.value) : "";
+        }
+        return this._value;
+    }
+    set value(value) { this._value = value === null || value === undefined ? "" : String(value); }
+    focus() { this.ownerDocument && (this.ownerDocument.activeElement = this); }
+    blur() {}
+    select() {}
+    scrollIntoView() {}
+    contains(node) { return node === this || this.all().includes(node); }
+    showModal() { this.open = true; }
+    close(result) {
+        this.open = false;
+        this.returnValue = result || "";
+        this.dispatch("close");
     }
     setAttribute(name, value) { this.attributes[name] = String(value); }
     getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; }
@@ -117,11 +141,15 @@ function matches(el, selector) {
     if (attr) {
         return (!attr[1] || el.tagName === attr[1].toUpperCase()) && el.hasAttribute(attr[2]) && (attr[3] === undefined || el.getAttribute(attr[2]) === attr[3]);
     }
-    if (selector.startsWith(".")) {
-        return el.className.split(/\s+/).includes(selector.slice(1));
-    }
     if (selector.includes(",")) {
         return selector.split(",").some((part) => matches(el, part.trim()));
+    }
+    const tagClass = selector.match(/^([a-z0-9]*)\.([\w-]+)$/i);
+    if (tagClass) {
+        return (!tagClass[1] || el.tagName === tagClass[1].toUpperCase()) && el.className.split(/\s+/).includes(tagClass[2]);
+    }
+    if (selector.startsWith("#")) {
+        return el.id === selector.slice(1);
     }
     return el.tagName === selector.toUpperCase();
 }
@@ -137,9 +165,15 @@ class FakeDocument extends FakeElement {
         this.documentElement.appendChild(this.body);
         this.appendChild(this.documentElement);
         this.readyState = "complete";
+        this.activeElement = this.body;
+        this.cookie = "";
         this.title = "";
     }
-    createElement(tag) { return new FakeElement(tag); }
+    createElement(tag) {
+        const el = new FakeElement(tag);
+        el.ownerDocument = this;
+        return el;
+    }
     createElementNS(ns, tag) { return new FakeElement(tag, ns); }
     createTextNode(text) { return new FakeText(text); }
     getElementById(id) { return this.all().find((el) => el.id === id || el.getAttribute("id") === id) || null; }
@@ -173,7 +207,9 @@ export function loadScripts(files, options = {}) {
         document,
         localStorage: options.storage || memoryStorage(),
         navigator: { languages: options.languages || ["en-GB"] },
-        location: { origin: "https://wishes.example", pathname: "/", reload() {} },
+        location: { origin: "https://wishes.example", href: "https://wishes.example/", pathname: "/", search: "", hash: "", reload() {} },
+        history: { replaceState() {} },
+        sessionStorage: memoryStorage(),
         URL,
         Intl,
         setTimeout: () => 0,
@@ -181,7 +217,11 @@ export function loadScripts(files, options = {}) {
         fetch: () => new Promise(() => {}),
         console
     };
+    Object.assign(sandbox, options.globals || {});
     sandbox.window = sandbox;
+    if (options.setup) {
+        options.setup(document);
+    }
     vm.createContext(sandbox);
     for (const file of files) {
         vm.runInContext(fs.readFileSync(path.join(root, "web/js", file), "utf8"), sandbox, { filename: file });
