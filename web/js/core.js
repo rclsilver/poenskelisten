@@ -594,14 +594,21 @@
     };
 
     // profileImage resolves with the user's picture, or null for the default.
+    // Pages show the same people many times (members, owners), so each
+    // picture is asked for once per page.
+    var profileCache = {};
     P.profileImage = function (userID, thumbnail) {
-        return P.api("GET", "auth/users/" + encodeURIComponent(userID) + "/image" + (thumbnail ? "?thumbnail=true" : ""))
-            .then(function (data) {
-                return !data.default && P.isImageDataUrl(data.image) ? data.image : null;
-            })
-            .catch(function () {
-                return null;
-            });
+        var key = userID + (thumbnail ? ":t" : ":f");
+        if (!profileCache[key]) {
+            profileCache[key] = P.api("GET", "auth/users/" + encodeURIComponent(userID) + "/image" + (thumbnail ? "?thumbnail=true" : ""))
+                .then(function (data) {
+                    return !data.default && P.isImageDataUrl(data.image) ? data.image : null;
+                })
+                .catch(function () {
+                    return null;
+                });
+        }
+        return profileCache[key];
     };
 
     // lazyImage fills holder with the image once loader resolves, and only
@@ -1023,6 +1030,29 @@
             langSelect.value = P.lang;
             langSelect.addEventListener("change", function () { P.setLang(langSelect.value); });
         }
+        // Header menus close on a click elsewhere or on Escape, which also
+        // gives the focus back to the menu button.
+        doc.addEventListener("click", function (event) {
+            doc.querySelectorAll("details.menu").forEach(function (menu) {
+                if (menu.open && !menu.contains(event.target)) {
+                    menu.open = false;
+                }
+            });
+        });
+        doc.addEventListener("keydown", function (event) {
+            if (event.key !== "Escape") {
+                return;
+            }
+            doc.querySelectorAll("details.menu").forEach(function (menu) {
+                if (menu.open) {
+                    menu.open = false;
+                    var summary = menu.querySelector("summary");
+                    if (summary) {
+                        summary.focus();
+                    }
+                }
+            });
+        });
     }
 
     function navLink(href, key, page) {
@@ -1051,11 +1081,6 @@
                     P.h("div", { class: "menu-head" }, P.h("strong", { text: P.displayName(user) })),
                     P.h("a", { href: "/account", class: "btn quiet" }, P.icon("user"), P.t("nav.account")),
                     P.button(P.t("nav.logout"), function () { if (typeof root.logout === "function") { root.logout(); } }, "quiet", "logOut")));
-            doc.addEventListener("click", function (event) {
-                if (menu.open && !menu.contains(event.target)) {
-                    menu.open = false;
-                }
-            });
             P.mount(account, menu);
         } else {
             links.hidden = true;

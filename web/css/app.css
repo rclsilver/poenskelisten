@@ -487,3 +487,4 @@ dialog::backdrop { background: var(--overlay); }
 .panel.spaced { margin-top: 40px; }
 .offline-art { border-radius: var(--r); width: 100%; aspect-ratio: 1.25; object-fit: cover; }
 @media (max-width: 640px) { .offline-art { display: none; } }
+@media (max-width: 640px) { .nav-name { display: none; } }
