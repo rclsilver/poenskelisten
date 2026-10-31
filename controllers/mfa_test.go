@@ -866,3 +866,76 @@ func TestValidateMFACorruptSecret(t *testing.T) {
 		t.Errorf("status = %d body=%v, want 500 'Failed to verify code.'", code, parsed)
 	}
 }
+
+func postValidateMFA(t *testing.T, userID models.User, code string) int {
+	t.Helper()
+	challenge, err := auth.GenerateMFAChallengeToken(userID.ID)
+	if err != nil {
+		t.Fatalf("failed to generate challenge token: %v", err)
+	}
+	body := `{"mfa_token":"` + challenge + `","code":"` + code + `"}`
+	status, _ := runJSONHandler(APIValidateMFA, "POST", "/api/open/tokens/mfa", body, nil, nil)
+	return status
+}
+
+// A fresh challenge token (a new password login) doesn't give a new budget:
+// wrong codes are counted per user.
+func TestValidateMFALocksAfterFailures(t *testing.T) {
+	setupControllersDB(t)
+	enableTOTPEncryption(t)
+	limitSignInAttempts(t, 3)
+	user := mfaTestUserWithPassword(t, "correct horse battery staple")
+	secret, _ := activateTestUser(t, user.ID)
+
+	for i := 0; i < 3; i++ {
+		if code := postValidateMFA(t, user, "000000"); code != 401 {
+			t.Fatalf("attempt %d = %d, want 401", i+1, code)
+		}
+	}
+	if code := postValidateMFA(t, user, totpCodeFor(t, secret)); code != 429 {
+		t.Errorf("locked attempt with a valid code = %d, want 429", code)
+	}
+
+	// Disabling MFA from a session shares the same budget.
+	body := `{"password":"correct horse battery staple","code":"` + totpCodeFor(t, secret) + `"}`
+	code, _ := runJSONHandler(APIDisableMFA, "POST", "/api/auth/users/mfa/disable", body, map[string]string{
+		"Authorization": authHeader(t, user.ID, false),
+	}, nil)
+	if code != 429 {
+		t.Errorf("MFA disable while locked = %d, want 429", code)
+	}
+}
+
+func TestValidateMFASuccessClearsFailures(t *testing.T) {
+	setupControllersDB(t)
+	enableTOTPEncryption(t)
+	limitSignInAttempts(t, 2)
+	user := mfaTestUserWithPassword(t, "correct horse battery staple")
+	secret, _ := activateTestUser(t, user.ID)
+
+	postValidateMFA(t, user, "000000")
+	if code := postValidateMFA(t, user, totpCodeFor(t, secret)); code != 200 {
+		t.Fatalf("valid code = %d, want 200", code)
+	}
+	if code := postValidateMFA(t, user, "000000"); code != 401 {
+		t.Errorf("failure after a success = %d, want 401", code)
+	}
+}
+
+func TestDisableMFACountsFailures(t *testing.T) {
+	setupControllersDB(t)
+	enableTOTPEncryption(t)
+	limitSignInAttempts(t, 2)
+	user := mfaTestUserWithPassword(t, "correct horse battery staple")
+	activateTestUser(t, user.ID)
+	header := map[string]string{"Authorization": authHeader(t, user.ID, false)}
+
+	wrongPassword := `{"password":"wrong","code":"000000"}`
+	wrongCode := `{"password":"correct horse battery staple","code":"000000"}`
+	first, _ := runJSONHandler(APIDisableMFA, "POST", "/api/auth/users/mfa/disable", wrongPassword, header, nil)
+	second, _ := runJSONHandler(APIDisableMFA, "POST", "/api/auth/users/mfa/disable", wrongCode, header, nil)
+	third, _ := runJSONHandler(APIDisableMFA, "POST", "/api/auth/users/mfa/disable", wrongCode, header, nil)
+	if first != 401 || second != 400 || third != 429 {
+		t.Errorf("codes = %d %d %d, want 401 400 429", first, second, third)
+	}
+}

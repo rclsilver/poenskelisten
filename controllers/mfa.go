@@ -14,6 +14,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// recordFailedSecondFactor counts a wrong password or code against the user's
+// sign-in budget, and logs when that locks it.
+func recordFailedSecondFactor(attemptKey string, userID uuid.UUID) {
+	if signInAttempts.Failed(attemptKey) {
+		logger.Log.Warn("Too many failed second-factor attempts for user " + userID.String() + "; the code check for it is locked for a while.")
+	}
+}
+
 // verifySecondFactor checks a user-supplied code against the user's TOTP secret
 // or their unused recovery codes. A matching recovery code is consumed. It
 // returns true when the code is accepted.
@@ -244,8 +252,17 @@ func APIDisableMFA(context *gin.Context) {
 		return
 	}
 
+	// Shares the login's budget: with a stolen session this is another place
+	// to guess the code (and the password) from.
+	attemptKey := userAttemptKey(userID)
+	if locked, retryAfter := signInAttempts.Blocked(attemptKey); locked {
+		middlewares.RefuseLockedAttempt(context, retryAfter)
+		return
+	}
+
 	if err := user.CheckPassword(request.Password); err != nil {
 		logger.Log.Error("Invalid credentials during MFA disable.")
+		recordFailedSecondFactor(attemptKey, userID)
 		context.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials."})
 		context.Abort()
 		return
@@ -259,10 +276,12 @@ func APIDisableMFA(context *gin.Context) {
 		return
 	}
 	if !verified {
+		recordFailedSecondFactor(attemptKey, userID)
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Invalid code. Please try again."})
 		context.Abort()
 		return
 	}
+	signInAttempts.Succeeded(attemptKey)
 
 	if err := database.DisableUserMFA(userID); err != nil {
 		logger.Log.Error("Failed to disable MFA. Error: " + err.Error())
@@ -294,6 +313,15 @@ func APIValidateMFA(context *gin.Context) {
 		return
 	}
 
+	// Whoever holds a challenge token already has the password, so the code is
+	// all that's left to guess: wrong codes are counted per user, across
+	// challenge tokens and addresses.
+	attemptKey := userAttemptKey(userID)
+	if locked, retryAfter := signInAttempts.Blocked(attemptKey); locked {
+		middlewares.RefuseLockedAttempt(context, retryAfter)
+		return
+	}
+
 	user, err := database.GetAllUserInformation(userID)
 	if err != nil {
 		logger.Log.Error("Failed to get user during MFA validation. Error: " + err.Error())
@@ -317,10 +345,12 @@ func APIValidateMFA(context *gin.Context) {
 		return
 	}
 	if !verified {
+		recordFailedSecondFactor(attemptKey, userID)
 		context.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid code. Please try again."})
 		context.Abort()
 		return
 	}
+	signInAttempts.Succeeded(attemptKey)
 
 	if err := issueSSOSession(context, user); err != nil {
 		logger.Log.Error("Failed to issue session after MFA. Error: " + err.Error())

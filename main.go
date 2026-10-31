@@ -188,6 +188,8 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	oauthRateLimit := config.OAuthRateLimit(configFile)
 	oauthLimit := middlewares.RateLimit(oauthRateLimit.Max, oauthRateLimit.Window)
 	registerRateLimit := config.RegisterRateLimit(configFile)
+	// Failed passwords and codes are also counted per account, from any address.
+	controllers.SetSignInAttemptLimit(config.AccountRateLimit(configFile))
 
 	// API endpoint
 	api := router.Group("/api")
@@ -515,6 +517,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 	var rateLimitLogin = flag.String("ratelimitlogin", configFile.RateLimitLogin, "Requests per client address to login, MFA, registration, password reset and e-mail verification, e.g. 20/15m, or off. Default "+config.DefaultLoginRateLimit+".")
 	var rateLimitOAuth = flag.String("ratelimitoauth", configFile.RateLimitOAuth, "Requests per client address to the OAuth authorize, consent, token and revoke endpoints, e.g. 60/1m, or off. Default "+config.DefaultOAuthRateLimit+".")
 	var rateLimitRegister = flag.String("ratelimitregister", configFile.RateLimitRegister, "OAuth client registrations per client address, e.g. 10/1h, or off. Default "+config.DefaultRegisterRateLimit+".")
+	var rateLimitAccount = flag.String("ratelimitaccount", configFile.RateLimitAccount, "Failed sign-in attempts per account (wrong passwords per e-mail, wrong codes per user) before it is locked for the rest of the window, e.g. 10/15m, or off. Default "+config.DefaultAccountRateLimit+".")
 
 	// Generate invite
 	var generateInvite = flag.String("generateinvite", "false", "If an invite code should be automatically generate on startup.")
@@ -715,6 +718,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 		{"ratelimitlogin", rateLimitLogin, &configFile.RateLimitLogin},
 		{"ratelimitoauth", rateLimitOAuth, &configFile.RateLimitOAuth},
 		{"ratelimitregister", rateLimitRegister, &configFile.RateLimitRegister},
+		{"ratelimitaccount", rateLimitAccount, &configFile.RateLimitAccount},
 	}
 	for _, rateLimitFlag := range rateLimitFlags {
 		if !provided[rateLimitFlag.name] {

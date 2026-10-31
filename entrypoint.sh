@@ -40,6 +40,7 @@ argCount=$#
 [ -n "$ratelimitlogin" ] && set -- "$@" --ratelimitlogin "$ratelimitlogin"
 [ -n "$ratelimitoauth" ] && set -- "$@" --ratelimitoauth "$ratelimitoauth"
 [ -n "$ratelimitregister" ] && set -- "$@" --ratelimitregister "$ratelimitregister"
+[ -n "$ratelimitaccount" ] && set -- "$@" --ratelimitaccount "$ratelimitaccount"
 
 # Add OIDC single sign-on flags if those environment variables are set
 [ -n "$oidcenabled" ] && set -- "$@" --oidcenabled "$oidcenabled"

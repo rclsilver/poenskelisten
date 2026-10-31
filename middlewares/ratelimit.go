@@ -71,6 +71,49 @@ func (r *rateLimiter) allow(key string) (allowed bool, retryAfter time.Duration,
 	return true, 0, false
 }
 
+// blocked reports whether key has used up its budget, without recording a hit.
+func (r *rateLimiter) blocked(key string) (bool, time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, exists := r.entries[key]
+	if !exists {
+		return false, 0
+	}
+	now := r.now()
+	entry.hits = recentHits(entry.hits, now.Add(-r.window))
+	if len(entry.hits) < r.max {
+		return false, 0
+	}
+	return true, entry.hits[0].Add(r.window).Sub(now)
+}
+
+// record adds a hit for key and reports whether that is the hit that used up
+// its budget. Only the latest max hits are kept, which is all blocked needs.
+func (r *rateLimiter) record(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := r.now()
+	entry, ok := r.liveEntry(key, now)
+	if !ok {
+		return false
+	}
+	wasBelow := len(entry.hits) < r.max
+	entry.hits = append(entry.hits, now)
+	if len(entry.hits) > r.max {
+		entry.hits = entry.hits[len(entry.hits)-r.max:]
+	}
+	return wasBelow && len(entry.hits) >= r.max
+}
+
+// reset forgets every hit for key.
+func (r *rateLimiter) reset(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.entries, key)
+}
+
 // liveEntry returns key's entry with expired hits dropped, creating it if
 // needed. It reports false when the limiter is full and key isn't tracked yet.
 // Callers hold r.mu.
@@ -181,4 +224,57 @@ func APIRateLimit(max int, window time.Duration) gin.HandlerFunc {
 	return limitRequests(max, window, func(ctx *gin.Context) {
 		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many attempts. Please wait a few minutes and try again."})
 	})
+}
+
+// AttemptLimiter counts failed attempts per account rather than per address,
+// so a password or a one-time code can't be guessed by spreading the attempts
+// over many addresses. Once an account has used up its budget, sign-in for it
+// is refused without checking anything until its oldest failure leaves the
+// window. That also locks out the real user meanwhile, which is the price of
+// stopping the guessing; the window keeps it short. A nil *AttemptLimiter
+// (the limit turned off) never blocks.
+type AttemptLimiter struct {
+	limiter *rateLimiter
+}
+
+// NewAttemptLimiter allows max failures per key within window; a non-positive
+// max turns it off.
+func NewAttemptLimiter(max int, window time.Duration) *AttemptLimiter {
+	if max <= 0 {
+		return nil
+	}
+	return &AttemptLimiter{limiter: newRateLimiter(max, window)}
+}
+
+// Blocked reports whether key is locked, and for how long.
+func (a *AttemptLimiter) Blocked(key string) (bool, time.Duration) {
+	if a == nil {
+		return false, 0
+	}
+	return a.limiter.blocked(key)
+}
+
+// Failed records a failed attempt for key, and reports whether this one
+// locked it.
+func (a *AttemptLimiter) Failed(key string) bool {
+	if a == nil {
+		return false
+	}
+	return a.limiter.record(key)
+}
+
+// Succeeded clears key's failures after a successful attempt.
+func (a *AttemptLimiter) Succeeded(key string) {
+	if a == nil {
+		return
+	}
+	a.limiter.reset(key)
+}
+
+// RefuseLockedAttempt answers a request for a locked account with 429. The
+// message doesn't say whether the account exists: unknown ones lock the same way.
+func RefuseLockedAttempt(ctx *gin.Context, retryAfter time.Duration) {
+	setRetryAfter(ctx, retryAfter)
+	ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many failed attempts. Please wait a few minutes and try again."})
+	ctx.Abort()
 }

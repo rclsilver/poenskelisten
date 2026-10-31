@@ -276,3 +276,60 @@ func TestRateLimitSharedAcrossRoutes(t *testing.T) {
 		t.Errorf("codes = %v, want [200 200 429]", codes)
 	}
 }
+
+func TestAttemptLimiterLocksAfterFailures(t *testing.T) {
+	attempts := NewAttemptLimiter(3, time.Minute)
+	clock := &fakeClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	attempts.limiter.now = clock.Now
+
+	locks := []bool{attempts.Failed("k"), attempts.Failed("k"), attempts.Failed("k")}
+	if locks[0] || locks[1] || !locks[2] {
+		t.Errorf("Failed reported locks %v, want only the third to lock", locks)
+	}
+	if locked, retryAfter := attempts.Blocked("k"); !locked || retryAfter != time.Minute {
+		t.Errorf("Blocked = %v, %v; want locked for a minute", locked, retryAfter)
+	}
+	if attempts.Failed("k") {
+		t.Error("a failure on an already locked key shouldn't report a new lock")
+	}
+	if locked, _ := attempts.Blocked("other"); locked {
+		t.Error("another key shouldn't be locked")
+	}
+
+	clock.Advance(time.Minute + time.Second)
+	if locked, _ := attempts.Blocked("k"); locked {
+		t.Error("the lock should lift once the failures leave the window")
+	}
+}
+
+func TestAttemptLimiterSuccessClears(t *testing.T) {
+	attempts := NewAttemptLimiter(2, time.Minute)
+	attempts.Failed("k")
+	attempts.Succeeded("k")
+	attempts.Failed("k")
+	if locked, _ := attempts.Blocked("k"); locked {
+		t.Error("a success should clear earlier failures")
+	}
+}
+
+func TestAttemptLimiterOff(t *testing.T) {
+	attempts := NewAttemptLimiter(0, time.Minute)
+	if attempts != nil {
+		t.Fatal("a zero max should turn the limiter off (nil)")
+	}
+	for i := 0; i < 20; i++ {
+		attempts.Failed("k")
+	}
+	attempts.Succeeded("k")
+	if locked, _ := attempts.Blocked("k"); locked {
+		t.Error("a disabled limiter never locks")
+	}
+}
+
+func TestRefuseLockedAttempt(t *testing.T) {
+	ctx, w := rateLimitTestContext("203.0.113.1:1")
+	RefuseLockedAttempt(ctx, 90*time.Second+time.Millisecond)
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "91" || !ctx.IsAborted() {
+		t.Errorf("got %d Retry-After %q aborted %v, want 429, 91, aborted", w.Code, w.Header().Get("Retry-After"), ctx.IsAborted())
+	}
+}

@@ -29,6 +29,10 @@ const (
 	// DefaultRegisterRateLimit applies, per client address, to dynamic client
 	// registration (/oauth/register).
 	DefaultRegisterRateLimit = "10/1h"
+	// DefaultAccountRateLimit is how many failed sign-in attempts an account
+	// takes before it is locked for the rest of the window: wrong passwords
+	// per e-mail, and wrong second factors per user, from any address.
+	DefaultAccountRateLimit = "10/15m"
 )
 
 // ParseRateLimit reads a limit written as "<requests>/<duration>", e.g.
@@ -89,6 +93,7 @@ func ValidateRateLimits(configFile models.ConfigStruct) error {
 		{"rate_limit_login", configFile.RateLimitLogin},
 		{"rate_limit_oauth", configFile.RateLimitOAuth},
 		{"rate_limit_register", configFile.RateLimitRegister},
+		{"rate_limit_account", configFile.RateLimitAccount},
 	}
 	for _, setting := range settings {
 		if strings.TrimSpace(setting.value) == "" {
@@ -99,4 +104,9 @@ func ValidateRateLimits(configFile models.ConfigStruct) error {
 		}
 	}
 	return nil
+}
+
+// AccountRateLimit is the per-account limit on failed sign-in attempts.
+func AccountRateLimit(configFile models.ConfigStruct) RateLimit {
+	return rateLimitOrDefault(configFile.RateLimitAccount, DefaultAccountRateLimit)
 }

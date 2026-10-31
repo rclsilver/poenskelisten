@@ -189,6 +189,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		"-ratelimitlogin", " 5/1m ",
 		"-ratelimitoauth", "off",
 		"-ratelimitregister", "3/2h",
+		"-ratelimitaccount", "4/30m",
 		"-generateinvite", "true",
 	)
 	logLevel := logger.Log.GetLevel()
@@ -244,6 +245,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		RateLimitLogin:              "5/1m",
 		RateLimitOAuth:              "off",
 		RateLimitRegister:           "3/2h",
+		RateLimitAccount:            "4/30m",
 	}
 	if out != want {
 		t.Errorf("parsed config mismatch:\n got %+v\nwant %+v", out, want)

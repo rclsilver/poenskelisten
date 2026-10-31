@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -183,5 +184,97 @@ func TestDummyPasswordHashUsesTheRealCost(t *testing.T) {
 	}
 	if passwordMatches(models.User{}, false, "no account has this password") {
 		t.Error("passwordMatches must never accept a login without an account")
+	}
+}
+
+// limitSignInAttempts sets a small per-account budget for one test.
+func limitSignInAttempts(t *testing.T, max int) {
+	t.Helper()
+	SetSignInAttemptLimit(config.RateLimit{Max: max, Window: time.Minute})
+	t.Cleanup(func() { SetSignInAttemptLimit(config.AccountRateLimit(models.ConfigStruct{})) })
+}
+
+func postGenerateTokenRecorder(body string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest("POST", "/api/open/tokens/register", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	GenerateToken(ctx)
+	return w
+}
+
+func TestGenerateTokenLocksAccountAfterFailures(t *testing.T) {
+	setupControllersDB(t)
+	enablePrivateKey(t)
+	limitSignInAttempts(t, 3)
+	user := createTestUserWithPassword(t, "Correct-Passw0rd")
+	other := createTestUserWithPassword(t, "Other-Passw0rd")
+
+	for i := 0; i < 3; i++ {
+		if code, _ := postGenerateToken(`{"email":"` + *user.Email + `","password":"wrong"}`); code != 401 {
+			t.Fatalf("attempt %d = %d, want 401", i+1, code)
+		}
+	}
+
+	// Locked: even the right password is refused, the e-mail's case doesn't
+	// matter, and nothing tells it apart from a wrong one.
+	w := postGenerateTokenRecorder(`{"email":"` + strings.ToUpper(*user.Email) + `","password":"Correct-Passw0rd"}`)
+	if w.Code != 429 || w.Header().Get("Retry-After") == "" {
+		t.Errorf("locked attempt = %d (Retry-After %q), want 429 with Retry-After", w.Code, w.Header().Get("Retry-After"))
+	}
+	if code, _ := postGenerateToken(`{"email":"` + *user.Email + `","password":"Correct-Passw0rd"}`); code != 429 {
+		t.Errorf("locked attempt with the right password = %d, want 429", code)
+	}
+
+	// Another account isn't affected.
+	if code, _ := postGenerateToken(`{"email":"` + *other.Email + `","password":"Other-Passw0rd"}`); code != 200 {
+		t.Errorf("other account = %d, want 200", code)
+	}
+}
+
+// An e-mail without an account locks exactly like a real one, so the lock
+// itself doesn't reveal which addresses exist.
+func TestGenerateTokenUnknownEmailLocksTheSameWay(t *testing.T) {
+	setupControllersDB(t)
+	limitSignInAttempts(t, 2)
+
+	codes := []int{}
+	for i := 0; i < 3; i++ {
+		code, _ := postGenerateToken(`{"email":"nobody@example.com","password":"wrong"}`)
+		codes = append(codes, code)
+	}
+	if codes[0] != 401 || codes[1] != 401 || codes[2] != 429 {
+		t.Errorf("codes = %v, want [401 401 429]", codes)
+	}
+}
+
+func TestGenerateTokenSuccessClearsFailures(t *testing.T) {
+	setupControllersDB(t)
+	enablePrivateKey(t)
+	limitSignInAttempts(t, 3)
+	user := createTestUserWithPassword(t, "Correct-Passw0rd")
+	wrong := `{"email":"` + *user.Email + `","password":"wrong"}`
+
+	postGenerateToken(wrong)
+	postGenerateToken(wrong)
+	if code, _ := postGenerateToken(`{"email":"` + *user.Email + `","password":"Correct-Passw0rd"}`); code != 200 {
+		t.Fatalf("login = %d, want 200", code)
+	}
+	postGenerateToken(wrong)
+	postGenerateToken(wrong)
+	if code, _ := postGenerateToken(wrong); code != 401 {
+		t.Errorf("third failure after a success = %d, want 401 (the success reset the count)", code)
+	}
+}
+
+func TestSignInAttemptLimitOff(t *testing.T) {
+	setupControllersDB(t)
+	SetSignInAttemptLimit(config.RateLimit{})
+	t.Cleanup(func() { SetSignInAttemptLimit(config.AccountRateLimit(models.ConfigStruct{})) })
+
+	for i := 0; i < 15; i++ {
+		if code, _ := postGenerateToken(`{"email":"nobody@example.com","password":"wrong"}`); code != 401 {
+			t.Fatalf("attempt %d = %d, want 401 with the limit off", i+1, code)
+		}
 	}
 }

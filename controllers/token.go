@@ -2,20 +2,49 @@ package controllers
 
 import (
 	"aunefyren/poenskelisten/auth"
+	"aunefyren/poenskelisten/config"
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/logger"
+	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type TokenRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+// signInAttempts counts failed sign-in attempts per account: wrong passwords
+// under the e-mail typed (whether or not it has an account, so a lock tells
+// nothing), and wrong second factors under the user. It complements the
+// per-address limit on the routes, which a guesser can dodge by spreading
+// attempts over many addresses. initRouter sets it from rate_limit_account.
+var signInAttempts = newSignInAttempts(config.AccountRateLimit(models.ConfigStruct{}))
+
+func newSignInAttempts(limit config.RateLimit) *middlewares.AttemptLimiter {
+	return middlewares.NewAttemptLimiter(limit.Max, limit.Window)
+}
+
+// SetSignInAttemptLimit replaces the per-account limit on failed sign-ins.
+// Call it before serving requests.
+func SetSignInAttemptLimit(limit config.RateLimit) {
+	signInAttempts = newSignInAttempts(limit)
+}
+
+func emailAttemptKey(email string) string {
+	return "email:" + strings.ToLower(strings.TrimSpace(email))
+}
+
+func userAttemptKey(userID uuid.UUID) string {
+	return "user:" + userID.String()
 }
 
 // dummyPasswordHash is checked against when there's no password to compare
@@ -53,6 +82,14 @@ func GenerateToken(context *gin.Context) {
 		return
 	}
 
+	// A locked account is refused before anything is checked, so guesses made
+	// during the lock can't be told right from wrong.
+	attemptKey := emailAttemptKey(request.Email)
+	if locked, retryAfter := signInAttempts.Blocked(attemptKey); locked {
+		middlewares.RefuseLockedAttempt(context, retryAfter)
+		return
+	}
+
 	// check if email exists and password is correct
 	user, err := database.GetAllUserInformationByEmail(request.Email)
 	found := err == nil
@@ -67,10 +104,19 @@ func GenerateToken(context *gin.Context) {
 	// status, the same message and, through passwordMatches, the same delay.
 	if !passwordMatches(user, found, request.Password) {
 		logger.Log.Info("Failed login attempt: invalid credentials.")
+		if signInAttempts.Failed(attemptKey) {
+			// The typed e-mail isn't logged: it's arbitrary client input.
+			subject := "an e-mail without an account"
+			if found {
+				subject = "user " + user.ID.String()
+			}
+			logger.Log.Warn("Too many failed passwords for " + subject + "; password login for it is locked for a while.")
+		}
 		context.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials."})
 		context.Abort()
 		return
 	}
+	signInAttempts.Succeeded(attemptKey)
 
 	// If MFA is enabled, the password alone is not enough: issue a short-lived
 	// challenge token and require the second factor via /open/tokens/mfa instead
