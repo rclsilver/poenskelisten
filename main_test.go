@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	textTemplate "text/template"
@@ -325,6 +328,13 @@ func TestInitRouterServesTemplatedFrontend(t *testing.T) {
 		{"/account", "text/html"},
 		{"/js/login.js", "application/javascript"},
 		{"/js/functions.js", "application/javascript"},
+		{"/js/core.js", "application/javascript"},
+		{"/js/session.js", "application/javascript"},
+		{"/register", "text/html"},
+		{"/verify", "text/html"},
+		{"/json/lang-en.json", "application/json"},
+		{"/json/lang-fr.json", "application/json"},
+		{"/css/app.css", "text/css"},
 		{"/service-worker.js", "application/javascript"},
 		{"/manifest.json", "application/json"},
 		{"/robots.txt", "text/plain"},
@@ -774,5 +784,127 @@ func TestInitRouterSetsSecurityHeaders(t *testing.T) {
 			w.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" || w.Header().Get("Referrer-Policy") != "same-origin" {
 			t.Errorf("GET %s headers = %v, want the security headers", path, w.Header())
 		}
+	}
+}
+
+// loadDictionaries reads every web/json/lang-<code>.json translation file.
+func loadDictionaries(t *testing.T) map[string]map[string]string {
+	t.Helper()
+	paths, err := filepath.Glob("web/json/lang-*.json")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no dictionaries found (err %v)", err)
+	}
+	dicts := map[string]map[string]string{}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dict := map[string]string{}
+		if err := json.Unmarshal(raw, &dict); err != nil {
+			t.Fatalf("%s is not a flat JSON object of strings: %v", path, err)
+		}
+		lang := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "lang-"), ".json")
+		dicts[lang] = dict
+	}
+	return dicts
+}
+
+var dictionaryPlaceholder = regexp.MustCompile(`\{(\w+)\}`)
+
+func placeholders(text string) string {
+	found := []string{}
+	for _, match := range dictionaryPlaceholder.FindAllStringSubmatch(text, -1) {
+		found = append(found, match[1])
+	}
+	sort.Strings(found)
+	return strings.Join(found, ",")
+}
+
+// Every language must translate every key, with the same {placeholders}, so
+// switching language never shows a raw key or drops a name from a sentence.
+func TestFrontendDictionariesMatch(t *testing.T) {
+	dicts := loadDictionaries(t)
+	reference, ok := dicts["en"]
+	if !ok || len(dicts) < 2 {
+		t.Fatalf("want English plus at least one other language, got %d dictionaries", len(dicts))
+	}
+	for lang, dict := range dicts {
+		for key, english := range reference {
+			text, found := dict[key]
+			if !found {
+				t.Errorf("%s: missing key %q", lang, key)
+				continue
+			}
+			if strings.TrimSpace(text) == "" {
+				t.Errorf("%s: empty translation for %q", lang, key)
+			}
+			if placeholders(text) != placeholders(english) {
+				t.Errorf("%s: %q has placeholders {%s}, English has {%s}", lang, key, placeholders(text), placeholders(english))
+			}
+		}
+		for key := range dict {
+			if _, found := reference[key]; !found {
+				t.Errorf("%s: key %q is not in the English dictionary", lang, key)
+			}
+		}
+	}
+}
+
+var (
+	translationCall  = regexp.MustCompile(`P\.(t|tn)\(\s*"([A-Za-z0-9_.]+)"`)
+	translationTitle = regexp.MustCompile(`title:\s*"([a-z][A-Za-z0-9]*\.[A-Za-z0-9_.]+)"`)
+	translationText  = regexp.MustCompile(`data-i18n="([A-Za-z0-9_.]+)"`)
+	translationAttrs = regexp.MustCompile(`data-i18n-attr="([^"]+)"`)
+)
+
+// Every key the pages ask for must exist, so no raw key reaches the screen.
+func TestFrontendTranslationKeysExist(t *testing.T) {
+	dict := loadDictionaries(t)["en"]
+	files := []string{}
+	for _, pattern := range []string{"web/js/*.js", "web/html/*.html", "web/templates/*.html"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
+	}
+	used := 0
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := string(raw)
+		keys := []string{}
+		for _, match := range translationCall.FindAllStringSubmatch(source, -1) {
+			if match[1] == "tn" {
+				keys = append(keys, match[2]+".one", match[2]+".other")
+			} else {
+				keys = append(keys, match[2])
+			}
+		}
+		for _, match := range translationTitle.FindAllStringSubmatch(source, -1) {
+			keys = append(keys, match[1])
+		}
+		for _, match := range translationText.FindAllStringSubmatch(source, -1) {
+			keys = append(keys, match[1])
+		}
+		for _, match := range translationAttrs.FindAllStringSubmatch(source, -1) {
+			for _, pair := range strings.Split(match[1], ";") {
+				if _, key, found := strings.Cut(pair, ":"); found {
+					keys = append(keys, strings.TrimSpace(key))
+				}
+			}
+		}
+		for _, key := range keys {
+			used++
+			if _, found := dict[key]; !found {
+				t.Errorf("%s uses translation key %q, which the dictionaries lack", file, key)
+			}
+		}
+	}
+	if used == 0 {
+		t.Fatal("found no translation keys at all; the patterns are out of date")
 	}
 }
