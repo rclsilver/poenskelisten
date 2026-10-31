@@ -4,10 +4,10 @@
 	"name": "{{.appName}}",
 	"short_name": "{{.appName}}",
 	"description": "{{.appDescription}}",
-	"theme_color": "#0d1b2a",
-	"background_color": "#e0e1dd",
+	"theme_color": "#315b45",
+	"background_color": "#f6f3ed",
 	"display": "standalone",
-	"orientation": "portrait",
+	"orientation": "any",
 	"scope": "/",
 	"start_url": "/",
 	"icons": [
