@@ -1897,3 +1897,60 @@ func TestGetUserInvalidUUIDNamesTheUser(t *testing.T) {
 		t.Errorf("got %d %v, want 400 with the user ID error", code, resp)
 	}
 }
+
+func TestGetUsersHidesOtherEmailsFromNonAdmins(t *testing.T) {
+	setupControllersDB(t)
+	requester := createTestUser(t)
+	other := createTestUser(t)
+	admin := createTestUser(t)
+	admin.Admin = true
+	if _, err := database.UpdateUserInDB(admin); err != nil {
+		t.Fatalf("failed to make admin: %v", err)
+	}
+
+	emails := func(callerID uuid.UUID) map[string]interface{} {
+		t.Helper()
+		header := map[string]string{"Authorization": authHeader(t, callerID, callerID == admin.ID)}
+		code, resp, _ := doRequest(GetUsers, "GET", "/api/auth/users", "", header, nil)
+		if code != 200 {
+			t.Fatalf("status = %d, want 200; body=%v", code, resp)
+		}
+		users, _ := resp["users"].([]interface{})
+		byID := map[string]interface{}{}
+		for _, entry := range users {
+			user := entry.(map[string]interface{})
+			byID[user["id"].(string)] = user["email"]
+		}
+		return byID
+	}
+
+	seen := emails(requester.ID)
+	if seen[requester.ID.String()] != *requester.Email {
+		t.Errorf("own email = %v, want %s", seen[requester.ID.String()], *requester.Email)
+	}
+	if seen[other.ID.String()] != nil || seen[admin.ID.String()] != nil {
+		t.Errorf("a non-admin saw other users' emails: %v", seen)
+	}
+
+	seen = emails(admin.ID)
+	if seen[other.ID.String()] != *other.Email {
+		t.Errorf("admin sees other email = %v, want %s", seen[other.ID.String()], *other.Email)
+	}
+}
+
+func TestGetUserHidesEmailFromOtherUsers(t *testing.T) {
+	setupControllersDB(t)
+	requester := createTestUser(t)
+	target := createTestUser(t)
+
+	header := map[string]string{"Authorization": authHeader(t, requester.ID, false)}
+	params := gin.Params{{Key: "user_id", Value: target.ID.String()}}
+	code, resp, _ := doRequest(GetUser, "GET", "/api/auth/users/"+target.ID.String(), "", header, params)
+	if code != 200 {
+		t.Fatalf("status = %d, want 200; body=%v", code, resp)
+	}
+	user, _ := resp["user"].(map[string]interface{})
+	if user["email"] != nil || user["first_name"] != "Test" {
+		t.Errorf("user = %v, want the name without the email", user)
+	}
+}
