@@ -240,7 +240,7 @@ Sharing is the owner's alone, as on the web: `get_wishlist_sharing` (read scope)
 Claims need the `mcp:wishes.claim` scope ("Claim wishes, and cancel your claims, on your behalf"): `claim_wish` and `unclaim_wish` take a `wish_id` and return `{id, claimed}`, never who else holds a claim. As on the web, the wishlist must be claimable, you must be a group member of it (not its owner or a collaborator, not the wish's author), a wish has a single claimer and only your own claim can be released. The wishlist owner is not e-mailed. Unclaiming twice reports an error the second time.
 
 Connected apps only ever get access to the MCP endpoint, never to
-the rest of Pønskelisten's API, and app registration is switched off along with MCP. Users can disconnect an app under "Connected apps" on their account page, and admins can revoke any registered client from the admin panel.
+the rest of Pønskelisten's API, and app registration is switched off along with MCP. Registration is open while MCP is on, so it is rate-limited (`rate_limit_register`) and bounded: at most 10 redirect URIs of up to 2000 characters each, https or http, without a fragment or credentials, and a single-line `client_name` of up to 100 characters. Users can disconnect an app under "Connected apps" on their account page, and admins can revoke any registered client from the admin panel.
 
 ## 🐳 Docker Setup
 
