@@ -804,7 +804,6 @@ func TestInitRouterSetsSecurityHeaders(t *testing.T) {
 	}
 }
 
-// loadDictionaries reads every web/json/lang-<code>.json translation file.
 func loadDictionaries(t *testing.T) map[string]map[string]string {
 	t.Helper()
 	paths, err := filepath.Glob("web/json/lang-*.json")
@@ -926,9 +925,7 @@ func TestFrontendTranslationKeysExist(t *testing.T) {
 	}
 }
 
-// The pages take the application name from the server's configuration. It is
-// free text, so it must come out escaped in the title and in the
-// application-name meta tag core.js reads it back from.
+// The application name is free text from the operator.
 func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 	name := `Ma "liste" <b>&</b>`
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
@@ -981,7 +978,6 @@ func TestServiceWorkerPrecachesServedFiles(t *testing.T) {
 	}
 }
 
-// frontendFiles lists the files the browser loads from web/.
 func frontendFiles(t *testing.T, patterns ...string) []string {
 	t.Helper()
 	files := []string{}

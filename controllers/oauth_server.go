@@ -514,10 +514,7 @@ func renderConsentPage(ctx *gin.Context, client models.OAuthClient, scopes []str
 	ctx.Data(http.StatusOK, "text/html; charset=utf-8", []byte(page))
 }
 
-// pageShell wraps a page the server writes itself in the app's look: its
-// stylesheet, the saved theme and the application name. body must already be
-// escaped. These pages carry no inline script or style, so the
-// Content-Security-Policy applies to them unchanged.
+// body must already be escaped. No inline code, so the CSP applies unchanged.
 func pageShell(title string, body string) string {
 	appName := htmlEscape(config.ConfigFile.PoenskelistenName)
 	return `<!doctype html><html><head><meta charset="utf-8">` +

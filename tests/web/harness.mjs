@@ -102,7 +102,6 @@ class FakeElement extends FakeNode {
     get className() { return this.getAttribute("class") || ""; }
     set className(value) { this.setAttribute("class", value); }
     get children() { return this.childNodes.filter((node) => node.nodeType === 1); }
-    // Every element in the subtree, depth first.
     all() {
         return this.children.flatMap((child) => [child, ...child.all()]);
     }
@@ -189,12 +188,10 @@ export function memoryStorage() {
     };
 }
 
-// loadCore returns a fresh P from web/js/core.js, with its fake document.
 export function loadCore(options = {}) {
     return loadScripts(["core.js"], options);
 }
 
-// loadScripts runs web/js files in order in one fresh VM, like a page would.
 export function loadScripts(files, options = {}) {
     const document = new FakeDocument();
     if (options.appName !== undefined) {
