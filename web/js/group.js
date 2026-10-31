@@ -1,491 +1,224 @@
-function load_page(result) {
+// A group (/groups/:id): the lists shared with it and its members. Members
+// share their own lists, create a list already shared with the group, and
+// leave. The owner edits the group, adds and removes members, and deletes it.
+// A list's owner can take it out of the group.
+(function () {
+    "use strict";
+    var h = P.h;
 
-    if(result !== false) {
-
-        try {
-            
-            var login_data = JSON.parse(result);
-
-            var email = login_data.data.email
-            var first_name = login_data.data.first_name
-            var last_name = login_data.data.last_name
-            user_id = login_data.data.id;
-            admin = login_data.data.admin;
-        } catch {
-            var email = ""
-            var first_name = ""
-            var last_name = ""
-            group_id = 0;
-            user_id = 0;
-            admin = false;
-        }
-
-        showAdminMenu(admin)
-
-    } else {
-        var login_data = false;
-        group_id = 0;
-        user_id = 0
-        var email = ""
-        var first_name = ""
-        var last_name = ""
+    function groupID() {
+        var match = window.location.pathname.match(/^\/groups\/([^\/]+)\/?$/);
+        return match ? decodeURIComponent(match[1]) : "";
     }
 
-    try {
-        string_index = document.URL.lastIndexOf('/');
-        group_id = document.URL.substring(string_index+1);
-        console.log(group_id);
-    } catch {
-        group_id = 0;
+    function checkedValues(boxes) {
+        return boxes.filter(function (box) { return box.input.checked; }).map(function (box) { return box.input.value; });
     }
 
-    var html = `
-                <!-- The Modal -->
-                <div id="myModal" class="modal closed">
-                    <span class="close clickable" style="padding: 0 0.25em;" onclick="toggleModal()">&times;</span>
-                    <div class="modalContent" id="modalContent">
-                    </div>
-                    <div id="caption"></div>
-                </div>
-
-                <div class="" id="front-page">
-                    
-                    <div class="module">
-
-                        <div class="group-info" id="group-info-box">
-
-                            <div class="loading-icon-wrapper" id="loading-icon-wrapper-group">
-                                <img class="loading-icon" src="/assets/loading.svg">
-                            </div>
-
-                            <div id="group-title" class="title">
-                            </div>
-
-                            <div class="text-body" id="group-description">
-                            </div>
-
-                            <div class="text-body" id="group-info">
-                            </div>
-
-                            <div class="bottom-right-button" id="" style="">
-                                <img class="icon-img clickable" src="/assets/user.svg" onclick="groupMembers('${group_id}', '${user_id}')" title="Configure members" style="margin: 0.25em;">
-                                <img class="icon-img clickable" src="/assets/list.svg" onclick="showWishlistsInGroup('${group_id}', '${user_id}')" title="Configure wishlists" style="margin: 0.25em;">
-                                <img class="icon-img clickable" id="edit-group" src="/assets/edit.svg" onclick="editGroup('${user_id}', '${group_id}');" title="Edit group" style="margin: 0.25em; display: none;">
-                                <img class="icon-img clickable" id="delete-group" src="/assets/trash-2.svg" onclick="deleteGroup('${group_id}');" title="Delete group" style="margin: 0.25em; display: none;"></img>
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                    <div class="module">
-
-                        <div id="wishlists-title" class="title-two">
-                            Wishlists:
-                        </div>
-
-                        <div class="profile-icon top-left-button" style="">
-                            <input class="clickable" onclick="toggleExpiredWishlists()" title="Toggle showing expired wishlists" style="" type="checkbox" id="toggle_expired_wishlists" name="toggle_expired_wishlists" value="confirm">
-                            <label for="toggle_expired_wishlists" style="" class="clickable">Show expired wishlists</label><br>
-                        </div>
-
-                        <div id="wishlists-box" class="wishlists">
-                            <div class="loading-icon-wrapper" id="loading-icon-wrapper">
-                                <img class="loading-icon" src="/assets/loading.svg">
-                            </div>
-                        </div>
-
-                        <div id="wishlist-input" class="wishlist-input">
-                            <button id="register-button" onClick="createNewWishlist('${group_id}', '${user_id}');" type="" href="/">Create new wishlist</button>
-                        </div>
-      
-                    </div>
-
-                </div>
-    `;
-
-    document.getElementById('content').innerHTML = html;
-    document.getElementById('card-header').innerHTML = 'Lists...';
-    clearResponse();
-
-    if(result !== false) {
-        showLoggedInMenu();
-        
-        get_group(group_id);
-        get_wishlists(group_id, login_data.data.id);
-    } else {
-        showLoggedOutMenu();
-        invalid_session();
+    // pickDialog lets the user tick items and sends them in one request.
+    function pickDialog(title, help, load, toBox, empty, submit) {
+        var holder = h("div", { class: "choice-list" }, P.loading());
+        var boxes = [];
+        var form = h("div", { class: "form-grid" }, h("p", { class: "help", text: help }), holder);
+        load().then(function (items) {
+            boxes = items.map(toBox);
+            P.mount(holder, boxes.length ? boxes.map(function (box) { return box.el; }) : h("p", { class: "help", text: empty }));
+        }, function (err) {
+            P.mount(holder, h("p", { class: "field-error", text: err.message }));
+        });
+        P.dialog({
+            title: title,
+            content: form,
+            actions: [
+                { label: P.t("action.cancel"), kind: "quiet" },
+                { label: P.t("action.add"), kind: "primary", onClick: function () {
+                    var values = checkedValues(boxes);
+                    if (values.length === 0) {
+                        return undefined;
+                    }
+                    return submit(values).then(function () { return true; }, function (err) {
+                        P.formError(form, err.message);
+                        return false;
+                    });
+                } }
+            ]
+        });
     }
-}
 
-function get_group(group_id){
+    function editDialog(group, onDone) {
+        var name = h("input", { type: "text", name: "name", required: true, value: group.name, attrs: { maxlength: 200, autocomplete: "off" } });
+        var description = h("textarea", { name: "description", value: group.description || "" });
+        var form = h("div", { class: "form-grid" }, P.field(P.t("group.name"), name, null, true), P.field(P.t("group.description"), description));
+        P.dialog({
+            title: P.t("group.edit"),
+            content: form,
+            actions: [
+                { label: P.t("action.cancel"), kind: "quiet" },
+                { label: P.t("action.save"), kind: "primary", onClick: function () {
+                    if (!name.value.trim()) {
+                        P.formError(form, P.t("group.nameRequired"));
+                        return false;
+                    }
+                    return P.api("POST", "auth/groups/" + encodeURIComponent(group.id), { name: name.value.trim(), description: description.value.trim() }).then(function () {
+                        onDone();
+                        return true;
+                    }, function (err) {
+                        P.formError(form, err.message);
+                        return false;
+                    });
+                } }
+            ]
+        });
+    }
 
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
+    P.page({
+        session: "required",
+        title: "nav.groups",
+        init: function (main, user) {
+            var id = groupID();
+            var path = "auth/groups/" + encodeURIComponent(id);
+            var showExpired = P.checkbox(P.t("lists.showExpired"), false);
+            var listGrid = h("div", { class: "grid three" }, P.loading());
+            var memberList = h("div");
+            var group = null;
+            var lists = [];
 
-                error(result.error);
+            var drawLists = function () {
+                var visible = lists.filter(function (wishlist) { return showExpired.input.checked || !P.isExpired(wishlist); });
+                P.mount(listGrid, visible.length ? visible.map(function (wishlist) {
+                    var card = P.listCard(wishlist, user.id);
+                    if (P.wishlistRole(wishlist, user.id) === "owner") {
+                        card.appendChild(h("div", { class: "collection-actions" }, P.button(P.t("group.removeList"), function () {
+                            P.confirm({ title: P.t("group.removeListTitle"), message: P.t("group.removeListConfirm", { list: wishlist.name, group: group.name }), confirm: P.t("group.removeList"), danger: true }).then(function (yes) {
+                                if (yes) {
+                                    P.api("POST", "auth/wishlists/" + encodeURIComponent(wishlist.id) + "/remove", { group_id: group.id }).then(function () {
+                                        P.toast(P.t("group.listRemoved"));
+                                        loadLists();
+                                    }, P.error);
+                                }
+                            });
+                        }, "small danger-quiet", "x")));
+                    }
+                    return card;
+                }) : P.emptyState(P.t("group.noLists")));
+            };
+            var loadLists = function () {
+                return P.api("GET", "auth/wishlists?group=" + encodeURIComponent(id)).then(function (result) {
+                    lists = result.wishlists || [];
+                    drawLists();
+                }, function (err) { P.mount(listGrid, P.emptyState(err.message)); });
+            };
+            showExpired.input.addEventListener("change", drawLists);
 
-            } else {
+            var drawMembers = function () {
+                var isOwner = group.owner && group.owner.id === user.id;
+                var members = (group.members || []).slice().sort(function (a, b) {
+                    return (b.id === group.owner.id) - (a.id === group.owner.id) || P.displayName(a).localeCompare(P.displayName(b));
+                });
+                P.mount(memberList, members.map(function (member) {
+                    var owner = member.id === group.owner.id;
+                    return h("div", { class: "member-row" },
+                        P.avatar(member),
+                        h("span", { class: "grow" }, P.displayName(member), member.id === user.id ? h("small", { text: P.t("group.you") }) : null),
+                        owner ? h("span", { class: "badge", text: P.t("group.owner") }) : null,
+                        isOwner && !owner ? P.button(P.t("group.removeMember", { name: P.displayName(member) }), function () {
+                            P.confirm({ title: P.t("group.removeMemberTitle"), message: P.t("group.removeMemberConfirm", { name: P.displayName(member) }), confirm: P.t("action.remove"), danger: true }).then(function (yes) {
+                                if (yes) {
+                                    P.api("POST", path + "/remove", { member_id: member.id }).then(function () {
+                                        P.toast(P.t("group.memberRemoved"));
+                                        load();
+                                    }, P.error);
+                                }
+                            });
+                        }, "small icon danger-quiet", "x") : null);
+                }));
+            };
 
-                console.log(result);
-                placeGroup(result.group);
+            var load = function () {
+                return P.api("GET", path).then(function (result) {
+                    group = result.group;
+                    render();
+                }, function (err) {
+                    P.mount(main, P.backLink("/groups", P.t("nav.groups")), P.emptyState(err.message));
+                });
+            };
 
-                if(result.group.owner.id == user_id) {
-                    showOwnerInputs();
-                    groupOwnerID = result.group.owner.id;
+            var render = function () {
+                var isOwner = group.owner && group.owner.id === user.id;
+                P.setTitle(group.name);
+                var actions = [];
+                if (isOwner) {
+                    actions.push(P.button(P.t("group.edit"), function () { editDialog(group, load); }, "", "edit"));
+                    actions.push(P.button(P.t("group.delete"), function () {
+                        P.confirm({ title: P.t("group.deleteTitle"), message: P.t("group.deleteConfirm", { name: group.name }), confirm: P.t("group.delete"), danger: true }).then(function (yes) {
+                            if (yes) {
+                                P.api("DELETE", path).then(function () { window.location.href = "/groups"; }, P.error);
+                            }
+                        });
+                    }, "danger-quiet", "trash"));
+                } else {
+                    actions.push(P.button(P.t("group.leave"), function () {
+                        P.confirm({ title: P.t("group.leaveTitle"), message: P.t("group.leaveConfirm", { name: group.name }), confirm: P.t("group.leave"), danger: true }).then(function (yes) {
+                            if (yes) {
+                                P.api("POST", path + "/leave").then(function () { window.location.href = "/groups"; }, P.error);
+                            }
+                        });
+                    }, "danger-quiet", "logOut"));
                 }
 
-            }
+                var shareOwn = P.button(P.t("group.shareList"), function () {
+                    pickDialog(P.t("group.shareList"), P.t("group.shareListHelp"), function () {
+                        return P.api("GET", "auth/wishlists?owned=true&notAMemberOfGroupID=" + encodeURIComponent(id)).then(function (result) {
+                            return (result.wishlists || []).filter(function (wishlist) { return P.wishlistRole(wishlist, user.id) === "owner"; });
+                        });
+                    }, function (wishlist) {
+                        return P.checkbox(wishlist.name, false, P.expiryText(wishlist) || null, { value: wishlist.id });
+                    }, P.t("group.noListToShare"), function (ids) {
+                        return P.api("POST", path + "/add", { wishlists: ids }).then(function () {
+                            P.toast(P.t("group.listsShared"));
+                            loadLists();
+                        });
+                    });
+                }, "", "share");
 
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/groups/" + group_id);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
+                var addMembers = isOwner ? P.button(P.t("group.addMembers"), function () {
+                    pickDialog(P.t("group.addMembers"), P.t("group.addMembersHelp"), function () {
+                        return P.api("GET", "auth/users?notAMemberOfGroupID=" + encodeURIComponent(id)).then(function (result) { return result.users || []; });
+                    }, function (person) {
+                        return P.checkbox(P.displayName(person), false, null, { value: person.id });
+                    }, P.t("group.nobodyToAdd"), function (ids) {
+                        return P.api("POST", path + "/join", { members: ids }).then(function () {
+                            P.toast(P.t("group.membersAdded"));
+                            load();
+                        });
+                    });
+                }, "small", "userPlus") : null;
 
-function placeGroup(group_object, showOwnerInput) {
-    try {
-        document.getElementById("loading-icon-wrapper-group").style.display = "none"
-    } catch(e) {
-        console.log("Error: " + e)
-    }
+                P.mount(main,
+                    P.backLink("/groups", P.t("nav.groups")),
+                    P.pageHeader(P.t("group.eyebrow"), group.name, group.description || "", actions),
+                    h("section", { "aria-labelledby": "group-lists-title" },
+                        h("div", { class: "section-top" },
+                            h("h2", { id: "group-lists-title", text: P.t("group.listsTitle") }),
+                            h("div", { class: "row" },
+                                showExpired.el,
+                                shareOwn,
+                                h("a", { class: "btn primary", href: "/wishlists/new?group=" + encodeURIComponent(id) }, P.icon("plus"), P.t("group.newList")))),
+                        listGrid),
+                    h("section", { class: "panel spaced", "aria-labelledby": "group-members-title" },
+                        h("div", { class: "row spread" },
+                            h("h2", { id: "group-members-title", text: P.tn("group.memberCount", (group.members || []).length) }),
+                            addMembers),
+                        memberList));
+                drawMembers();
+                drawLists();
+            };
 
-    document.getElementById("group-title").innerHTML = group_object.name
-    document.getElementById("group-description").innerHTML = group_object.description
-    document.getElementById("group-info").innerHTML = "<br>Owner: " + group_object.owner.first_name + " " + group_object.owner.last_name
-    
-    if(showOwnerInput) {
-        console.log("Showing")
-        showOwnerInputs();
-    }
-}
-
-function get_wishlists(group_id, user_id){
-
-    console.log(group_id + ", " + user_id);
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                clearResponse();
-                wishlists = result.wishlists;
-                console.log(result);
-                placeWishlists(wishlists, user_id, group_id, false);
-
-            }
-
-        } else {
-            info("Loading wishlists...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/wishlists?group=" + group_id);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function placeWishlists(wishlists_array, user_id, group_id, showExpired) {
-
-    var html_regular = ''
-    var html = ''
-    var wishlists_array_length = wishlists_array.length
-    var wishlists_expired_length = 0
-
-    for(var i = 0; i < wishlists_array.length; i++) {
-
-        var expired = false;
-        var expiredHTMLClass = ''
-        var wishlistDisplayStyle = 'flex'
-        html = ''
-
-        try {
-            var expiration = new Date(Date.parse(wishlists_array[i].date));
-            var now = new Date
-            if(expiration.getTime() < now.getTime() && wishlists_array[i].expires) {
-                expired = true;
-                expiredHTMLClass = 'wishlist-expired'
-
-                wishlists_array_length -= 1
-                wishlists_expired_length += 1
-            }
-        } catch(err) {
-            console.log("Failed to parse datetime. Error: " + err)
-        }
-
-        if(expired && !showExpired) {
-            wishlistDisplayStyle = 'none';
-        }
-
-        var wishUpdatedAt = new Date(Date.parse(wishlists_array[i].wish_updated_at));
-        var wishUpdatedAtString = GetDateString(wishUpdatedAt)
-
-        html += `<div class="wishlist-wrapper ${expiredHTMLClass}" style="display: ${wishlistDisplayStyle}" id="wishlistWrapper-${wishlists_array[i].id}">`
-
-        html += '<div class="wishlist hoverable-light">'
-
-        if(wishlists_array[i].wish_updated_at) {
-            html += `
-                <div class="unselectable wish-updatedat" title="Updated at">
-                    <div class="wish-updatedat-text">Updated at:</div>
-                    <div class="wish-updatedat-date" id="wishlistUpdatedAt-${wishlists_array[i].id}">
-                        ${wishUpdatedAtString}
-                    </div>
-                </div>
-            `;
-        }
-        
-        html += `<div class="wishlist-title clickable underline" onclick="location.href = '/wishlists/${wishlists_array[i].id}'" title="Go to wishlist">`;
-        html += `<div class="profile-icon">`
-        html += '<img class="icon-img " src="/assets/list.svg">'
-        html += `</div><b id="wishlistName-${wishlists_array[i].id}">`
-        html += wishlists_array[i].name
-        html += '</b></div>'
-
-        html += '<div class="profile" title="Wishlist owner">'
-
-        html += '<div class="profile-wrapper">'
-
-        html += `<div class="profile-name">`
-        html += wishlists_array[i].owner.first_name + " " + wishlists_array[i].owner.last_name
-        html += '</div>'
-        html += `<div class="profile-icon icon-border icon-background" id="group_owner_image_${wishlists_array[i].owner.id}_${wishlists_array[i].id}">`
-        html += '<img class="icon-img " src="/assets/user.svg">'
-        html += '</div>'
-
-        html += '</div>'
-
-        html += '<div class="icons-wrapper">'
-
-        html += `
-            <div class="profile-icon clickable" onclick="showWishlistCollaboratorsInWishlist('${wishlists_array[i].id}', '${user_id}')" title="Wishlist collaborators">
-                <img class="icon-img " src="/assets/smile.svg">
-            </div>
-        `;
-
-        if(wishlists_array[i].owner.id == user_id) {
-            html += `
-                <div class="profile-icon clickable" onclick="showGroupsInWishlist('${wishlists_array[i].id}', '${user_id}', '${group_id}')" title="Wishlist groups">
-                    <img class="icon-img " src="/assets/users.svg">
-                </div>
-            `;
-        }
-
-        if(wishlists_array[i].owner.id == user_id) {
-            html += `
-                <div class="profile-icon clickable" onclick="editWishlist('${user_id}', '${wishlists_array[i].id}')" title="Edit wishlist">
-                    <img class="icon-img " src="/assets/edit.svg">
-                </div>
-            `;
-
-            html += `<div class="profile-icon clickable" onclick="deleteWishlist('${wishlists_array[i].id}', '${user_id}')" title="Delete wishlist">`;
-            html += '<img class="icon-img " src="/assets/trash-2.svg">'
-            html += '</div>'
-        }
-
-        html += '</div>'
-        html += '</div>'
-        html += '</div>'
-        html += '</div>'
-
-        html_regular += html;
-    }
-
-    if(wishlists_array_length < 1) {
-        info("Looks like this list is empty... Someone needs to add their wishlist to this group!");
-
-        try {
-            document.getElementById("loading-icon-wrapper").style.display = "none"
-        } catch(e) {
-            console.log("Error: " + e)
-        }
-    }
-
-    wishlist_object = document.getElementById("wishlists-box")
-    wishlist_object.innerHTML = html_regular
-
-    for(var i = 0; i < wishlists_array.length; i++) {
-        GetProfileImage(wishlists_array[i].owner.id, `group_owner_image_${wishlists_array[i].owner.id}_${wishlists_array[i].id}`)
-    }
-}
-
-function showOwnerInputs() {
-    groupEdit = document.getElementById("edit-group");
-    groupEdit.style.display = "flex";
-    groupDelete = document.getElementById("delete-group");
-    groupDelete.style.display = "flex";
-}
-
-function GetProfileImage(userID, divID) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                if(!result.default) {
-                    PlaceProfileImage(result.image, divID)
+            load().then(function () {
+                if (group) {
+                    loadLists();
                 }
-                
-            }
-
-        } else {
-            // info("Loading week...");
+            });
         }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/users/" + userID + "/image?thumbnail=true");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-
-    return;
-}
-
-function PlaceProfileImage(imageBase64, divID) {
-
-    var image = document.getElementById(divID)
-    image.style.backgroundSize = "cover"
-    image.innerHTML = ""
-    image.style.backgroundImage = `url('${imageBase64}')`
-    image.style.backgroundPosition = "center center"
-
-}
-
-function remove_member(wishlist_id, group_id, user_id) {
-
-    if(!confirm("Are you sure you want to remove your wishlist from this group?")) {
-        return;
-    }
-
-    var form_obj = { 
-        "group_id" : group_id
-    };
-
-    var form_data = JSON.stringify(form_obj);
-
-    console.log(form_data)
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                success(result.message);
-                console.log(result);
-
-                console.log("User ID: " + user_id);
-
-                wishlists = result.wishlists;
-
-                console.log("Placing groups after member is removed: ")
-                placeWishlists(wishlists, user_id, group_id);
-                
-            }
-
-        } else {
-            info("Removing member...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "auth/wishlists/" + wishlist_id + "/remove?group=" + group_id);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send(form_data);
-    return false;
-
-}
-
-function placeWishlist(wishlistOject, publicURL) {
-    document.getElementById("wishlistName-" + wishlistOject.id).innerHTML = wishlistOject.name
-    var wishUpdatedAt = new Date(Date.parse(wishlistOject.wish_updated_at));
-    var wishUpdatedAtString = GetDateString(wishUpdatedAt)
-    document.getElementById(`wishlistUpdatedAt-${wishlistOject.id}`).innerHTML = wishUpdatedAtString
-
-    var wishlist = document.getElementById(`wishlistWrapper-${wishlistOject.id}`)
-    var wishlistHTML = wishlist.outerHTML
-    wishlist.remove()
-    
-    var wishlists = document.getElementById(`wishlists-box`)
-    wishlists.innerHTML = wishlistHTML + wishlists.innerHTML
-}
-
-function removeWishlist(wishlistID, userID) {
-    document.getElementById(`wishlistWrapper-${wishlistID}`).remove();
-}
-
-function removeGroup(groupID, userID) {
-    window.location.href = "/groups"
-}
-
-function toggleExpiredWishlists() {
-    toggleButtonState = document.getElementById('toggle_expired_wishlists').checked
-    wishlistElements = document.getElementById('wishlists-box').children
-
-    for(var i = 0; i < wishlistElements.length; i++) {
-        if(wishlistElements[i].classList.contains('wishlist-expired')) {
-            if(toggleButtonState) {
-                wishlistElements[i].style.display = 'flex'
-            } else {
-                wishlistElements[i].style.display = 'none'
-            }
-        }
-    }
-}
+    });
+})();
