@@ -638,16 +638,33 @@ func TestInitRouterEscapesAppText(t *testing.T) {
 	name := "A`${alert(1)}\\ & <b>\"'"
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name, PoenskelistenDescription: name})
 
-	w := serve(router, http.MethodGet, "/js/frontpage.js")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /js/frontpage.js = %d, want 200", w.Code)
-	}
+	// The scripts read the name from the page, but any JS template that
+	// places it in a template literal gets this escaping.
 	escaped := "A&#96;&#36;{alert(1)}&#92; &amp; &lt;b&gt;&#34;&#39;"
-	if !strings.Contains(w.Body.String(), escaped) {
-		t.Errorf("frontpage.js does not contain the escaped app name %q", escaped)
+	if got := withAppText(gin.H{"appName": name}, escapeForJSHTML)["appName"]; got != escaped {
+		t.Errorf("escaped JS app name = %q, want %q", got, escaped)
 	}
-	if strings.Contains(w.Body.String(), name) || strings.Contains(w.Body.String(), "${alert") {
-		t.Error("frontpage.js contains the raw app name")
+	scripts, err := filepath.Glob("web/js/*.js")
+	if err != nil || len(scripts) == 0 {
+		t.Fatalf("no scripts found (err %v)", err)
+	}
+	for _, script := range scripts {
+		path := "/js/" + filepath.Base(script)
+		if path == "/js/service-worker.js" {
+			path = "/service-worker.js"
+		}
+		w := serve(router, http.MethodGet, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", path, w.Code)
+		}
+		if strings.Contains(w.Body.String(), name) || strings.Contains(w.Body.String(), "${alert") {
+			t.Errorf("%s contains the raw app name", path)
+		}
+	}
+
+	w := serve(router, http.MethodGet, "/")
+	if strings.Contains(w.Body.String(), "<b>") || !strings.Contains(w.Body.String(), `content="A`) {
+		t.Errorf("/ doesn't carry the escaped app name; body: %s", w.Body.String())
 	}
 
 	w = serve(router, http.MethodGet, "/manifest.json")
@@ -916,7 +933,7 @@ func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 	name := `Ma "liste" <b>&</b>`
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
 	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback",
-		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account", "/admin"} {
+		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account", "/admin", "/"} {
 		w := serve(router, http.MethodGet, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s = %d, want 200", path, w.Code)

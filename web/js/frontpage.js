@@ -1,357 +1,79 @@
-function load_page(result) {
+// Home page: a welcome, the five most recently updated active lists, the
+// news feed and a word about groups.
+(function () {
+    "use strict";
+    var h = P.h;
 
-    if(result !== false) {
-
-        try {
-
-            var login_data = JSON.parse(result);
-
-            if(login_data.error === "You must verify your account.") {
-                verifyRedirect();
+    function newsSection(user) {
+        var grid = h("div", { class: "news-grid" }, P.loading());
+        var section = h("section", { "aria-labelledby": "news-title" },
+            h("div", { class: "section-top" },
+                h("h2", { id: "news-title", text: P.t("news.title") }),
+                user.admin ? h("a", { class: "btn quiet", href: "/admin#news" }, P.icon("edit"), P.t("news.manage")) : null),
+            grid);
+        P.api("GET", "auth/news").then(function (result) {
+            // Admins also receive scheduled posts; the home page shows only
+            // what everyone sees, the admin page lists the rest.
+            var now = Date.now();
+            var posts = (result.news || []).filter(function (post) {
+                var date = P.parseDate(post.date);
+                return !date || date.getTime() <= now;
+            }).sort(function (a, b) {
+                return Date.parse(b.date) - Date.parse(a.date);
+            });
+            if (posts.length === 0) {
+                P.mount(grid, P.emptyState(P.t("news.empty")));
                 return;
             }
-
-            var email = login_data.data.email
-            var first_name = login_data.data.first_name
-            var last_name = login_data.data.last_name
-            admin = login_data.data.admin;
-        } catch {
-            var email = ""
-            var first_name = ""
-            var last_name = ""
-            admin = false;
-        }
-
-        showAdminMenu(admin)
-
-    } else {
-        var login_data = false;
-        var email = ""
-        var first_name = ""
-        var last_name = ""
-        admin = false;
+            P.mount(grid, posts.map(function (post) {
+                return h("article", { class: "news-post" },
+                    h("span", { class: "eyebrow", text: P.fmtDay(post.date) }),
+                    h("h3", { text: post.title }),
+                    h("p", { text: post.body }));
+            }));
+        }, function (err) {
+            P.mount(grid, P.emptyState(err.message));
+        });
+        return section;
     }
 
-    var html = `
-                <!-- The Modal -->
-                <div id="myModal" class="modal closed">
-                    <span class="close clickable" onclick="toggleModal()">&times;</span>
-                    <div class="modalContent" id="modalContent">
-                    </div>
-                    <div id="caption"></div>
-                </div>
+    P.page({
+        session: "required",
+        title: "nav.home",
+        init: function (main, user) {
+            var lists = h("div", { class: "grid three" }, P.loading());
+            P.mount(main,
+                h("section", { class: "hero" },
+                    h("div", { class: "intro" },
+                        h("span", { class: "eyebrow", text: P.t("home.hello", { name: user.first_name || P.displayName(user) }) }),
+                        h("h1", { text: P.t("home.title"), tabIndex: -1 }),
+                        h("p", { text: P.t("home.intro") }),
+                        h("div", { class: "row" },
+                            h("a", { class: "btn primary", href: "/wishlists/new" }, P.icon("plus"), P.t("list.create")),
+                            h("a", { class: "btn", href: "/wishes/new?from=home" }, P.icon("gift"), P.t("wish.add")))),
+                    h("div", { class: "hero-art", attrs: { "aria-hidden": "true" } },
+                        h("img", { src: "/assets/illustrations/lamp.svg", alt: "", width: 640, height: 520 }),
+                        h("img", { class: "mini-art", src: "/assets/illustrations/cup.svg", alt: "", width: 640, height: 520 }))),
+                h("section", { "aria-labelledby": "recent-title" },
+                    h("div", { class: "section-top" },
+                        h("h2", { id: "recent-title", text: P.t("home.recent") }),
+                        h("a", { class: "btn quiet", href: "/wishlists", text: P.t("home.allLists") })),
+                    lists),
+                newsSection(user),
+                h("div", { class: "callout" },
+                    h("div", null, h("h3", { text: P.t("home.groupsTitle") }), h("p", { text: P.t("home.groupsIntro") })),
+                    h("a", { class: "btn", href: "/groups" }, P.icon("users"), P.t("nav.groups"))));
 
-                <div class="" id="front-page">
-                    
-                    <div class="module">
-                    
-                        <div class="title">
-                            {{.appName}}
-                        </div>
-
-                        <div class="text-body" id="main-text" style="text-align: center;">
-                            {{.appDescription}}
-
-                            <br>
-                            <br>
-
-                            Welcome to the front page. Use to navigation bar and head to Wishlists to manage your wishlists. Head to Groups to manage and view wishlists in groups.
-
-                            <div class="labels">
-                                <div class="blue-label clickable" onclick="location.href='/wishlists'">My Wishlists</div>
-                                <div class="blue-label clickable" onclick="location.href='/groups'">Groups</div>
-                            </div>
-
-                            <div id="wishlists-front-page">
-                                <div id="wishlists-title" class="title-two">
-                                    Recently updated wishlists:
-                                </div>
-
-                                <div id="wishlists-box" class="wishlists-minimal">
-                                    <div class="loading-icon-wrapper" id="loading-icon-wrapper">
-                                        <img class="loading-icon" src="/assets/loading.svg">
-                                    </div>
-                                </div>
-                            </div>
-
-                        </div>
-
-                        <div id="log-in-button" style="margin-top: 2em; display: none; width: 10em;">
-                            <button id="update-button" type="submit" href="#" onclick="window.location = './login';">Log in</button>
-                        </div>
-
-                    </div>
-
-                    <hr id="module-split"></hr>
-
-                    <div class="module">
-
-                        <div id="news-title" class="title" style="display: none;">
-                            News:
-                        </div>
-
-                        <div class="loading-icon-wrapper" id="loading-icon-wrapper-news">
-                            <img class="loading-icon" src="/assets/loading.svg">
-                        </div>
-
-                        <div id="news-box" class="news">
-                        </div>
-                        
-                    </div>
-
-                    <div class="module" id="new-news" style="display: none;">
-                        <button id="register-button" onClick="createNewsPost(${admin});" type="" href="/">Create news post</button>
-                    </div>
-
-                </div>
-    `;
-
-    document.getElementById('content').innerHTML = html;
-    document.getElementById('card-header').innerHTML = 'Welcome to the frontpage!';
-    clearResponse();
-
-    if(result !== false) {
-
-        showLoggedInMenu();
-        get_news(admin);
-        getWishlists();
-
-        if(admin) {
-            document.getElementById('new-news').style.display = "flex";
-        }
-
-    } else {
-        showLoggedOutMenu();
-        document.getElementById('main-text').innerHTML = "You need to login.";
-        document.getElementById('log-in-button').style.display = 'inline-block';
-
-        try {
-            document.getElementById("loading-icon-wrapper-news").style.display = "none"
-        } catch(e) {
-            console.log("Error: " + e)
-        }
-
-        try {
-            document.getElementById("module-split").style.display = "none"
-        } catch(e) {
-            console.log("Error: " + e)
-        }
-    }
-}
-
-function get_news(admin){
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                clearResponse();
-                news = result.news;
-
-                console.log(news);
-
-                console.log("Placing intial news: ")
-                placeNewsPosts(news, admin);
-
-            }
-
-        } else {
-            info("Loading news...");
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/news");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function placeNewsPosts(news_array, admin) {
-    try {
-        document.getElementById("loading-icon-wrapper-news").style.display = "none"
-    } catch(e) {
-        console.log("Error: " + e)
-    }
-
-    if(news_array.length == 0) {
-        return;
-    } else {
-        document.getElementById("news-title").style.display = "inline-block"
-    }
-
-    var html = ''
-
-    for(var i = 0; i < news_array.length; i++) {
-        html += buildNewsPostHTML(news_array[i], admin)
-    }
-
-    news_object = document.getElementById("news-box")
-    news_object.innerHTML = html
-}
-
-function removeNewsPost(newsPostID) {
-    document.getElementById(`newsPost-${newsPostID}`).remove()
-}
-
-function verifyRedirect() {
-    window.location = '/verify'
-}
-
-function placeNewsPost(newsPostObject, adminStatus) {
-    try {
-        var now = new Date();
-        var date = new Date(Date.parse(newsPostObject.expiry_date));
-        if(date.getTime() < now.getTime()) {
-            removeNewsPost(newsPostObject.id)
-            return
-        }
-    } catch(error) {
-        console.log("Error: " + error)
-    }
-
-    document.getElementById(`newsPost-${newsPostObject.id}`).outerHTML = buildNewsPostHTML(newsPostObject, adminStatus)
-    reorderPostsByDate();
-}
-
-function buildNewsPostHTML(newsPostObject, adminStatus) {
-    html = "";
-
-    // parse date object
-    var transparentHTML = "";
-    try {
-        var now = new Date();
-        var date = new Date(Date.parse(newsPostObject.date));
-        var date_string = date.toLocaleDateString();
-        if(date.getTime() > now.getTime()) {
-            transparentHTML = "transparent"
-        }
-    } catch {
-        var date_string = "Error"
-    }
-
-    html += `<div class="news-post ${transparentHTML}" id="newsPost-${newsPostObject.id}">`
-
-    html += `<input type="hidden" id="newsPostDate-${newsPostObject.id}" value="${newsPostObject.date}"></input>`
-
-    if(adminStatus) {
-        html += `
-            <div class="profile-icon top-right-button" style="padding-top: 0;">
-                <img class="icon-img clickable" src="/assets/edit.svg" title="Edit news post" onclick="editNewsPost('${newsPostObject.id}');">
-                <img class="icon-img clickable" src="/assets/trash-2.svg" title="Delete news post" onclick="deleteNewsPost('${newsPostObject.id}');">
-            </div>
-        `
-    }
-    
-    html += '<div id="news-title" class="title">';
-    html += newsPostObject.title
-    html += '</div>';
-
-    html += '<div id="news-body" class="text-body">';
-    html += newsPostObject.body
-    html += '</div>';
-
-    html += '<div id="news-body" class="text-date">';
-    html += date_string
-    html += '</div>';
-
-    html += '</div>'
-
-    return html
-}
-
-function reorderPostsByDate() {
-    var wrapperId = "news-box"
-
-    // Get the wrapper element
-    const wrapper = document.getElementById(wrapperId);
-  
-    if (!wrapper) {
-      console.error('Wrapper element not found');
-      return;
-    }
-  
-    // Convert child elements into an array for sorting
-    const posts = Array.from(wrapper.children);
-  
-    // Sort posts based on the date in the hidden input
-    posts.sort((a, b) => {
-      const dateA = new Date(a.querySelector('input[type="hidden"]').value);
-      const dateB = new Date(b.querySelector('input[type="hidden"]').value);
-  
-      // Sort in descending order (latest date first)
-      return dateB - dateA;
-    });
-  
-    // Append sorted posts back to the wrapper
-    posts.forEach(post => wrapper.appendChild(post));
-}
-
-function getWishlists(){
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-                error(result.error);
-            } else {
-                clearResponse();
-                wishlists = result.wishlists;
-
-                if(wishlists.length > 0) {
-                    placeWishlists(wishlists);
-                } else {
-                    document.getElementById('wishlists-front-page').style.display = 'none'
+            P.api("GET", "auth/wishlists?top=5&expired=false").then(function (result) {
+                var wishlists = result.wishlists || [];
+                if (wishlists.length === 0) {
+                    P.mount(lists, P.emptyState(P.t("home.noLists"), h("a", { class: "btn primary", href: "/wishlists/new" }, P.icon("plus"), P.t("list.create"))));
+                    return;
                 }
-            }
+                P.mount(lists, wishlists.map(function (wishlist) { return P.listCard(wishlist, user.id); }));
+            }, function (err) {
+                P.mount(lists, P.emptyState(err.message));
+            });
         }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/wishlists?top=5&expired=false");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function placeWishlists(wishlistArray) {
-    wishlistsHTML = "";
-
-    for(var i = 0; i < wishlistArray.length; i++) {
-        var wishlistHTML = createWishlistHTML(wishlistArray[i])
-        wishlistsHTML += wishlistHTML
-    }
-
-    document.getElementById('wishlists-box').innerHTML = wishlistsHTML
-}
-
-function createWishlistHTML(wishlistObject) {
-    return `
-        <div class="wishlist-minimal clickable" title="Go to wishlist" onclick="location.href='/wishlists/${wishlistObject.id}'">
-            <img class="icon-img" src="/assets/list.svg" style="margin-right: 0.25em;">
-            <p id="wishlistName-${wishlistObject.id}">
-            ${wishlistObject.name}
-            </p>
-        </div>
-    `;
-}
+    });
+})();
