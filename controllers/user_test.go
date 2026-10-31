@@ -2169,3 +2169,45 @@ func TestGetUserHidesEmailFromOtherUsers(t *testing.T) {
 		t.Errorf("user = %v, want the name without the email", user)
 	}
 }
+
+// GetUser hands the self and admin views the full record (so disabled accounts
+// can be shown), which must still never include the password hash or the
+// one-time verification and reset codes.
+func TestGetUserNeverReturnsSecrets(t *testing.T) {
+	setupControllersDB(t)
+	target := createTestUserWithPassword(t, "Password1")
+	if _, err := database.GenerateRandomResetCodeForUser(target.ID, true); err != nil {
+		t.Fatalf("failed to set a reset code: %v", err)
+	}
+	if _, err := database.GenerateRandomVerificationCodeForUser(target.ID); err != nil {
+		t.Fatalf("failed to set a verification code: %v", err)
+	}
+	admin := createTestUser(t)
+	admin.Admin = true
+	if _, err := database.UpdateUserInDB(admin); err != nil {
+		t.Fatalf("failed to make admin: %v", err)
+	}
+
+	for name, callerID := range map[string]uuid.UUID{"self": target.ID, "admin": admin.ID} {
+		t.Run(name, func(t *testing.T) {
+			header := map[string]string{"Authorization": authHeader(t, callerID, callerID == admin.ID)}
+			params := gin.Params{{Key: "user_id", Value: target.ID.String()}}
+			code, resp, _ := doRequest(GetUser, "GET", "/api/auth/users/"+target.ID.String(), "", header, params)
+			if code != 200 {
+				t.Fatalf("status = %d, want 200; body=%v", code, resp)
+			}
+			user, ok := resp["user"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected a user object, got %v", resp)
+			}
+			for _, field := range []string{"password", "verification_code", "reset_code", "reset_expiration"} {
+				if user[field] != nil {
+					t.Errorf("%s = %v, want it withheld", field, user[field])
+				}
+			}
+			if user["email"] != *target.Email {
+				t.Errorf("email = %v, want %s", user["email"], *target.Email)
+			}
+		})
+	}
+}
