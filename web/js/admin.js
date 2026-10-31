@@ -1,851 +1,395 @@
-function load_page(result) {
+// Administration: server information (read only, including the application
+// name, which is a server setting), news, invite codes, users, OAuth
+// clients, currency and security settings. The API checks the admin flag on
+// every call; the page only spares others a page of errors.
+(function () {
+    "use strict";
+    var h = P.h;
 
-    if(result !== false) {
-       
-        try {
+    function panel(id, title, help, body, wide, action) {
+        return h("section", { class: "panel" + (wide ? " full" : ""), id: id, "aria-labelledby": id + "-title" },
+            h("div", { class: "row spread" }, h("h2", { id: id + "-title", text: title }), action || null),
+            help ? h("p", { class: "help", text: help }) : null,
+            body);
+    }
 
-            var login_data = JSON.parse(result);
+    // ------------------------------------------------------------ server info
 
-            var email = login_data.data.email
-            var first_name = login_data.data.first_name
-            var last_name = login_data.data.last_name
-            admin = login_data.data.admin;
-        } catch {
-            var email = ""
-            var first_name = ""
-            var last_name = ""
-            admin = false;
+    function value(kind, raw) {
+        if (kind === "bool") {
+            return h("span", { class: "badge " + (raw ? "ok" : ""), text: raw ? P.t("admin.on") : P.t("admin.off") });
         }
-
-        showAdminMenu(admin)
-
-    } else {
-        var email = ""
-        var first_name = ""
-        var last_name = ""
-    }
-
-    try {
-        string_index = document.URL.lastIndexOf('/');
-        wishlist_id = document.URL.substring(string_index+1);
-
-        group_id = 0
-    }
-    catch {
-        group_id = 0
-        wishlist_id = 0
-    }
-
-   var html = `
-        <!-- The Modal -->
-        <div id="myModal" class="modal closed">
-            <span class="close clickable" style="padding: 0 0.25em;" onclick="toggleModal()">&times;</span>
-            <div class="modalContent" id="modalContent">
-            </div>
-            <div id="caption"></div>
-        </div>
-
-        <div class="modules" id="admin-page">
-            
-            <div class="server-info" id="server-info">
-                <h3 id="server-info-title">Server info:</h3>
-                <div id="server-info-body">
-                    <div class="server-info-line"><div class="server-info-title">Loading</div><div class="server-info-value is-muted">…</div></div>
-                </div>
-            </div>
-
-            <div class="invites" id="invites">
-                <h3 id="invitation-module-title">Invites:</h3>
-                <div class="invite-list" id="invite-list">
-                </div>
-                <button type="submit" onclick="generate_invite();" id="generate_invite_button" style=""><img src="assets/plus.svg" class="btn_logo"><p2>Generate</p2></button>
-            
-            </div>
-
-            <div class="currency-module" id="currency-module">
-
-                <h3 id="currency-module-title">Currency:</h3>
-
-                <input type="text" name="currency" id="currency" placeholder="What currency can wishes be listed in?" value="" autocomplete="off" required />
-
-                <input class="clickable" onclick="" style="margin-top: 0.5em;" type="checkbox" id="currency-padding" name="currency-padding" value="confirm" >
-                <label for="currency-padding" class="clickable">Pad the currency string</label><br>
-
-                <input class="clickable" onclick="" style="margin-top: 1em;" type="checkbox" id="currency-left" name="currency-left" value="confirm" >
-                <label for="currency-left" class="clickable">Currency on the left side</label><br>
-
-                <button type="submit" onclick="update_currency();" id="update_currency_button" style=""><img src="assets/check.svg" class="btn_logo"><p2>Update</p2></button>
-
-            </div>
-
-            <div class="security-module" id="security-module">
-
-                <h3 id="security-module-title">Security:</h3>
-
-                <input class="clickable" style="margin-top: 0.5em;" type="checkbox" id="mfa-enforced" name="mfa-enforced" value="confirm" >
-                <label for="mfa-enforced" class="clickable">Require all local users to set up two-factor authentication</label><br>
-
-                <input class="clickable" style="margin-top: 1em;" type="checkbox" id="mfa-recovery-codes" name="mfa-recovery-codes" value="confirm" >
-                <label for="mfa-recovery-codes" class="clickable">Issue recovery codes when users enroll</label><br>
-
-                <button type="submit" onclick="update_server_settings();" id="update_security_button" style=""><img src="assets/check.svg" class="btn_logo"><p2>Update</p2></button>
-
-            </div>
-
-            <div class="oauth-clients-module" id="oauth-clients-module">
-
-                <h3 id="oauth-clients-title">Connected apps:</h3>
-
-                <div class="oauth-client-list" id="oauth-client-list"></div>
-
-            </div>
-
-        </div>
-    `;
-
-    document.getElementById('content').innerHTML = html;
-    document.getElementById('card-header').innerHTML = 'Ultimate power';
-    clearResponse();
-
-    if(result !== false) {
-        showLoggedInMenu();
-
-        if(!admin) {
-            document.getElementById('content').innerHTML = "...";
-            error("You are not an admin.")
-        } else {
-            get_server_info();
-            get_invites();
-            get_currency();
-            get_oauth_clients();
+        var text = raw === null || raw === undefined ? "" : String(raw);
+        if (!text.trim()) {
+            return h("span", { class: "muted", text: P.t("admin.notSet") });
         }
-
-    } else {
-        showLoggedOutMenu();
-        invalid_session();
+        return h("span", { class: kind === "mono" ? "mono" : "", text: text });
     }
-}
 
-function get_server_info() {
+    function rows(title, list) {
+        return h("div", { class: "kv-group" },
+            h("h3", { text: title }),
+            h("div", { class: "kv" }, list.filter(Boolean).map(function (row) {
+                return h("div", { class: "kv-row" }, h("span", { text: row[0] }), value(row[2] || "text", row[1]));
+            })));
+    }
 
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
+    function serverInfo(info) {
+        var external = (info.poenskelisten_external_url || "").trim();
+        var additional = info.poenskelisten_additional_urls || [];
+        var sqlite = (info.database_type || "").toLowerCase() === "sqlite";
+        return [
+            rows(P.t("admin.application"), [
+                [P.t("admin.appName"), info.app_name],
+                [P.t("admin.version"), info.poenskelisten_version],
+                [P.t("admin.environment"), info.poenskelisten_environment],
+                [P.t("admin.externalURL"), external || (additional.length ? P.t("admin.externalURLMissingAdditional", { issuer: info.oauth_issuer }) : P.t("admin.externalURLMissing", { issuer: info.oauth_issuer })), external ? "mono" : "text"],
+                [P.t("admin.additionalURLs"), additional.join(", "), "mono"],
+                [P.t("admin.port"), info.poenskelisten_port],
+                [P.t("admin.timezone"), info.timezone],
+                [P.t("admin.logLevel"), info.poenskelisten_log_level],
+                (info.poenskelisten_environment || "").toLowerCase() === "test" ? [P.t("admin.testEmail"), info.poenskelisten_test_email, "mono"] : null
+            ]),
+            h("p", { class: "help", text: P.t("admin.appNameHelp") }),
+            rows(P.t("admin.database"), sqlite ? [
+                [P.t("admin.type"), info.database_type],
+                [P.t("admin.file"), info.database_location, "mono"]
+            ] : [
+                [P.t("admin.type"), info.database_type],
+                [P.t("admin.name"), info.database_name],
+                [P.t("admin.host"), info.database_host, "mono"],
+                [P.t("admin.port"), info.database_port],
+                ["SSL", info.database_ssl, "bool"]
+            ]),
+            rows(P.t("admin.email"), [
+                [P.t("admin.status"), info.smtp_enabled, "bool"],
+                info.smtp_enabled ? [P.t("admin.host"), info.smtp_host, "mono"] : null,
+                info.smtp_enabled ? [P.t("admin.port"), info.smtp_port] : null,
+                info.smtp_enabled ? [P.t("admin.from"), info.smtp_from, "mono"] : null
+            ]),
+            rows(P.t("admin.sso"), [
+                [P.t("admin.status"), info.oidc_enabled, "bool"],
+                info.oidc_enabled ? [P.t("admin.provider"), info.oidc_provider_name] : null,
+                info.oidc_enabled ? [P.t("admin.issuer"), info.oidc_issuer_url, "mono"] : null,
+                info.oidc_enabled ? [P.t("admin.clientID"), info.oidc_client_id, "mono"] : null,
+                info.oidc_enabled ? [P.t("admin.redirectURL"), info.oidc_redirect_url, "mono"] : null,
+                info.oidc_enabled ? [P.t("admin.autoCreate"), info.oidc_auto_create_users, "bool"] : null,
+                info.oidc_enabled ? [P.t("admin.passwordLogin"), info.local_login_enabled, "bool"] : null
+            ]),
+            rows(P.t("admin.security"), [
+                [P.t("admin.mfaEnforced"), info.mfa_enforced, "bool"],
+                [P.t("admin.recoveryCodes"), info.mfa_recovery_codes_enabled, "bool"]
+            ]),
+            rows(P.t("admin.mcp"), [
+                [P.t("admin.status"), info.mcp_enabled, "bool"],
+                info.mcp_enabled ? [P.t("admin.endpoint"), info.mcp_endpoint, "mono"] : null,
+                [P.t("admin.appRegistration"), info.mcp_enabled, "bool"]
+            ])
+        ];
+    }
+
+    // ------------------------------------------------------------------ news
+
+    function newsDialog(post, onDone) {
+        var title = h("input", { type: "text", name: "title", required: true, value: post ? post.title : "", attrs: { minlength: 5, maxlength: 200, autocomplete: "off" } });
+        var body = h("textarea", { name: "body", required: true, value: post ? post.body : "", attrs: { minlength: 5 } });
+        var date = h("input", { type: "date", name: "date", required: true, value: post ? P.dayInputValue(post.date) : P.todayInputValue() });
+        var expiry = h("input", { type: "date", name: "expiry_date", value: post && post.expiry_date ? P.dayInputValue(post.expiry_date) : "" });
+        var form = h("div", { class: "form-grid" },
+            P.field(P.t("news.postTitle"), title, P.t("news.minLength"), true),
+            P.field(P.t("news.postBody"), body, P.t("news.minLength"), true),
+            h("div", { class: "field-row" },
+                P.field(P.t("news.date"), date, P.t("news.dateHelp"), true),
+                P.field(P.t("news.expiry"), expiry, P.t("news.expiryHelp"))));
+        P.dialog({
+            title: post ? P.t("news.edit") : P.t("news.create"),
+            content: form,
+            actions: [
+                { label: P.t("action.cancel"), kind: "quiet" },
+                { label: post ? P.t("action.save") : P.t("news.publish"), kind: "primary", onClick: function () {
+                    P.formError(form, "");
+                    if (title.value.trim().length < 5 || body.value.trim().length < 5) {
+                        P.formError(form, P.t("news.minLength"));
+                        return false;
+                    }
+                    if (!P.dayToApi(date.value)) {
+                        P.formError(form, P.t("news.dateRequired"));
+                        return false;
+                    }
+                    if (expiry.value && expiry.value < date.value) {
+                        P.formError(form, P.t("news.expiryBeforeDate"));
+                        return false;
+                    }
+                    var payload = {
+                        title: title.value.trim(),
+                        body: body.value.trim(),
+                        date: P.dayToApi(date.value),
+                        expiry_date: expiry.value ? P.dayToApi(expiry.value) : null
+                    };
+                    var request = post ? P.api("POST", "admin/news/" + encodeURIComponent(post.id), payload) : P.api("POST", "admin/news", payload);
+                    return request.then(function () {
+                        P.toast(post ? P.t("news.saved") : P.t("news.published"));
+                        onDone();
+                        return true;
+                    }, function (err) {
+                        P.formError(form, err.message);
+                        return false;
+                    });
+                } }
+            ]
+        });
+    }
+
+    function newsList(container) {
+        var load = function () {
+            P.api("GET", "auth/news").then(function (result) {
+                var now = Date.now();
+                var posts = (result.news || []).slice().sort(function (a, b) { return Date.parse(b.date) - Date.parse(a.date); });
+                P.mount(container, posts.length ? h("div", { class: "news-grid" }, posts.map(function (post) {
+                    var scheduled = Date.parse(post.date) > now;
+                    return h("article", { class: "news-post" },
+                        h("div", { class: "row spread" },
+                            h("span", { class: "eyebrow", text: P.fmtDay(post.date) }),
+                            h("span", { class: "badge " + (scheduled ? "warn" : "ok"), text: scheduled ? P.t("news.scheduled") : P.t("news.live") })),
+                        h("h3", { text: post.title }),
+                        h("p", { text: post.body }),
+                        post.expiry_date ? h("p", { class: "help", text: P.t("news.expiresOn", { date: P.fmtDay(post.expiry_date) }) }) : null,
+                        h("div", { class: "row news-actions" },
+                            P.button(P.t("action.edit"), function () { newsDialog(post, load); }, "small", "edit"),
+                            P.button(P.t("action.delete"), function () {
+                                P.confirm({ title: P.t("news.deleteTitle"), message: post.title, confirm: P.t("action.delete"), danger: true }).then(function (yes) {
+                                    if (yes) {
+                                        P.api("DELETE", "admin/news/" + encodeURIComponent(post.id)).then(function () {
+                                            P.toast(P.t("news.deleted"));
+                                            load();
+                                        }, P.error);
+                                    }
+                                });
+                            }, "small danger-quiet", "trash")));
+                })) : P.emptyState(P.t("news.none")));
+            }, function (err) { P.mount(container, P.emptyState(err.message)); });
+        };
+        load();
+        return load;
+    }
+
+    // ----------------------------------------------------------------- users
+
+    function userDialog(userID, onChange) {
+        var body = h("div", null, P.loading());
+        var dialog = P.dialog({ title: P.t("admin.user"), content: body });
+        P.api("GET", "auth/users/" + encodeURIComponent(userID)).then(function (result) {
+            var person = result.user;
+            var act = function (confirmOptions, method, path, done) {
+                return function () {
+                    P.confirm(confirmOptions).then(function (yes) {
+                        if (yes) {
+                            P.api(method, path).then(function (response) {
+                                P.toast(response.message || P.t("admin.done"));
+                                dialog.close();
+                                if (done) {
+                                    done();
+                                }
+                            }, P.error);
+                        }
+                    });
+                };
+            };
+            var base = "admin/users/" + encodeURIComponent(person.id);
+            P.mount(body, h("div", { class: "stack" },
+                h("div", { class: "row" }, P.avatar(person, "large"), h("div", { class: "stack tight" },
+                    h("strong", { text: P.displayName(person) }),
+                    person.email ? h("span", { class: "mono", text: person.email }) : null)),
+                h("div", { class: "kv" },
+                    h("div", { class: "kv-row" }, h("span", { text: P.t("admin.joined") }), h("span", { text: P.fmtDate(person.created_at) })),
+                    h("div", { class: "kv-row" }, h("span", { text: P.t("account.admin") }), value("bool", person.admin)),
+                    h("div", { class: "kv-row" }, h("span", { text: P.t("mfa.heading") }), value("bool", person.mfa_enabled)),
+                    h("div", { class: "kv-row" }, h("span", { text: P.t("admin.signIn") }), h("span", { text: person.auth_source === "oidc" ? P.t("admin.signInOIDC") : P.t("admin.signInLocal") }))),
+                h("div", { class: "row" },
+                    P.button(P.t("admin.revokeSessions"), act({ title: P.t("admin.revokeSessionsTitle"), message: P.t("admin.revokeSessionsConfirm", { name: P.displayName(person) }), confirm: P.t("admin.revokeSessions"), danger: true }, "DELETE", base + "/sessions"), "", "logOut"),
+                    person.mfa_enabled ? P.button(P.t("admin.removeMFA"), act({ title: P.t("admin.removeMFATitle"), message: P.t("admin.removeMFAConfirm", { name: P.displayName(person) }), confirm: P.t("admin.removeMFA"), danger: true }, "DELETE", base + "/mfa", onChange), "", "lock") : null,
+                    P.button(P.t("admin.deleteUser"), act({ title: P.t("admin.deleteUserTitle"), message: P.t("admin.deleteUserConfirm", { name: P.displayName(person) }), confirm: P.t("admin.deleteUser"), danger: true }, "DELETE", base, onChange), "danger", "trash"))));
+        }, function (err) {
+            P.mount(body, h("p", { class: "field-error", text: err.message }));
+        });
+    }
+
+    function usersList(container, me) {
+        var load = function () {
+            P.api("GET", "auth/users").then(function (result) {
+                var users = (result.users || []).slice().sort(function (a, b) { return P.displayName(a).localeCompare(P.displayName(b)); });
+                P.mount(container, users.map(function (person) {
+                    return h("div", { class: "member-row" },
+                        P.avatar(person),
+                        h("span", { class: "grow" }, P.displayName(person), person.email ? h("small", { class: "mono", text: person.email }) : null),
+                        person.admin ? h("span", { class: "badge ok", text: P.t("account.admin") }) : null,
+                        person.id === me.id ? h("span", { class: "badge", text: P.t("group.you") }) : P.button(P.t("admin.manage"), function () { userDialog(person.id, load); }, "small"));
+                }));
+            }, function (err) { P.mount(container, h("p", { class: "field-error", text: err.message })); });
+        };
+        load();
+        return load;
+    }
+
+    // --------------------------------------------------------------- invites
+
+    function invitesList(container, onUser) {
+        var draw = function (invites) {
+            P.mount(container, invites.length ? invites.map(function (invite) {
+                var link = window.location.origin + "/register?invite=" + encodeURIComponent(invite.invite_code);
+                return h("div", { class: "member-row" },
+                    h("span", { class: "grow" }, h("code", { class: "mono", text: invite.invite_code }),
+                        invite.invite_used ? h("small", { text: P.t("admin.inviteUsedBy", { name: P.displayName(invite.user) }) }) : h("small", { text: P.t("admin.inviteFree") })),
+                    invite.invite_used ? P.button(P.t("admin.manage"), function () { onUser(invite.user.id); }, "small") : [
+                        P.button(P.t("admin.copyInvite"), function () { P.copyText(link); }, "small icon", "copy"),
+                        P.button(P.t("admin.deleteInvite"), function () {
+                            P.confirm({ title: P.t("admin.deleteInviteTitle"), message: invite.invite_code, confirm: P.t("action.delete"), danger: true }).then(function (yes) {
+                                if (yes) {
+                                    P.api("DELETE", "admin/invites/" + encodeURIComponent(invite.id)).then(function (result) { draw(result.invites || []); }, P.error);
+                                }
+                            });
+                        }, "small icon danger-quiet", "trash")
+                    ]);
+            }) : h("p", { class: "help", text: P.t("admin.noInvites") }));
+        };
+        var load = function () {
+            P.api("GET", "admin/invites").then(function (result) { draw(result.invites || []); }, function (err) {
+                P.mount(container, h("p", { class: "field-error", text: err.message }));
+            });
+        };
+        load();
+        return {
+            generate: function (button) {
+                P.busy(button, P.api("POST", "admin/invites")).then(function (result) {
+                    P.toast(P.t("admin.inviteCreated"));
+                    draw(result.invites || []);
+                }, P.error);
+            }
+        };
+    }
+
+    // ---------------------------------------------------------- OAuth clients
+
+    function clientsList(container) {
+        var load = function () {
+            P.api("GET", "admin/oauth/clients").then(function (result) {
+                var clients = result.clients || [];
+                P.mount(container, clients.length ? clients.map(function (client) {
+                    var name = client.client_name && client.client_name.trim() ? client.client_name : client.client_id;
+                    var state = client.is_first_party ? h("span", { class: "badge", text: P.t("admin.builtIn") }) :
+                        client.enabled ? P.button(P.t("admin.revoke"), function () {
+                            P.confirm({ title: P.t("admin.revokeClientTitle"), message: P.t("admin.revokeClientConfirm", { name: name }), confirm: P.t("admin.revoke"), danger: true }).then(function (yes) {
+                                if (yes) {
+                                    P.api("DELETE", "admin/oauth/clients/" + encodeURIComponent(client.client_id)).then(function () {
+                                        P.toast(P.t("admin.clientRevoked"));
+                                        load();
+                                    }, P.error);
+                                }
+                            });
+                        }, "small danger-quiet") : h("span", { class: "badge danger", text: P.t("admin.revoked") });
+                    return h("div", { class: "member-row" }, h("span", { class: "grow", text: name }), state);
+                }) : h("p", { class: "help", text: P.t("admin.noClients") }));
+            }, function (err) { P.mount(container, h("p", { class: "field-error", text: err.message })); });
+        };
+        load();
+    }
+
+    // ------------------------------------------------------ editable settings
+
+    function currencyForm() {
+        var currency = h("input", { type: "text", name: "currency", required: true, attrs: { maxlength: 10, autocomplete: "off" } });
+        var padding = P.checkbox(P.t("admin.currencyPad"), false, P.t("admin.currencyPadHelp"));
+        var left = P.checkbox(P.t("admin.currencyLeft"), false, P.t("admin.currencyLeftHelp"));
+        var example = h("p", { class: "help" });
+        var showExample = function () {
+            example.textContent = P.t("admin.currencyExample", { price: P.fmtPrice(129.5, { currency: currency.value.trim(), padding: padding.input.checked, left: left.input.checked }) });
+        };
+        [currency, padding.input, left.input].forEach(function (input) { input.addEventListener("input", showExample); input.addEventListener("change", showExample); });
+        var fill = function (result) {
+            currency.value = result.currency || "";
+            padding.input.checked = !!result.padding;
+            left.input.checked = !!result.left;
+            showExample();
+        };
+        P.api("GET", "auth/currency").then(fill, P.error);
+        var save = h("button", { type: "submit", class: "btn primary", text: P.t("action.save") });
+        var form = h("form", { class: "form-grid", on: { submit: function (event) {
+            event.preventDefault();
+            P.formError(form, "");
+            P.busy(save, P.api("POST", "admin/currency/update", {
+                poenskelisten_currency: currency.value.trim(),
+                poenskelisten_currency_pad: padding.input.checked,
+                poenskelisten_currency_left: left.input.checked
+            })).then(function (result) {
+                fill(result);
+                P.toast(P.t("admin.saved"));
+            }, function (err) { P.formError(form, err.message); });
+        } } }, P.field(P.t("admin.currency"), currency), padding.el, left.el, example, h("div", null, save));
+        return form;
+    }
+
+    function securityForm(info) {
+        var enforced = P.checkbox(P.t("admin.mfaEnforced"), false, P.t("admin.mfaEnforcedHelp"));
+        var codes = P.checkbox(P.t("admin.recoveryCodes"), false, P.t("admin.recoveryCodesHelp"));
+        var save = h("button", { type: "submit", class: "btn primary", text: P.t("action.save") });
+        var fill = function (data) {
+            enforced.input.checked = data.mfa_enforced === true;
+            codes.input.checked = data.mfa_recovery_codes_enabled === true;
+        };
+        info.then(fill);
+        var form = h("form", { class: "form-grid", on: { submit: function (event) {
+            event.preventDefault();
+            P.formError(form, "");
+            P.busy(save, P.api("POST", "admin/server/settings", { mfa_enforced: enforced.input.checked, mfa_recovery_codes_enabled: codes.input.checked })).then(function (result) {
+                fill(result);
+                P.toast(P.t("admin.saved"));
+            }, function (err) { P.formError(form, err.message); });
+        } } }, enforced.el, codes.el, h("div", null, save));
+        return form;
+    }
+
+    P.page({
+        session: "required",
+        title: "nav.admin",
+        init: function (main, user) {
+            if (!user.admin) {
+                P.mount(main, P.emptyState(P.t("admin.notAdmin"), h("a", { class: "btn", href: "/", text: P.t("nav.home") })));
                 return;
             }
-            
-            if(result.error) {
+            var infoBox = h("div", null, P.loading());
+            var newsBox = h("div", null, P.loading());
+            var usersBox = h("div", null, P.loading());
+            var invitesBox = h("div", null, P.loading());
+            var clientsBox = h("div", null, P.loading());
 
-                error(result.error);
+            var info = P.api("POST", "admin/server/info").then(function (result) { return result.server; });
+            info.then(function (server) { P.mount(infoBox, serverInfo(server)); }, function (err) { P.mount(infoBox, h("p", { class: "field-error", text: err.message })); });
 
-            } else {
+            var reloadNews = newsList(newsBox);
+            var reloadUsers = usersList(usersBox, user);
+            var invites = invitesList(invitesBox, function (id) { userDialog(id, reloadUsers); });
+            clientsList(clientsBox);
 
-                place_server_info(result.server)
-                
-            }
+            var generate = P.button(P.t("admin.generateInvite"), function () { invites.generate(generate); }, "small primary", "plus");
 
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "admin/server/info");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
+            P.mount(main,
+                P.pageHeader(P.t("admin.eyebrow"), P.t("admin.title"), P.t("admin.intro")),
+                h("div", { class: "settings-grid" },
+                    panel("news", P.t("news.title"), P.t("admin.newsHelp"), newsBox, true,
+                        P.button(P.t("news.create"), function () { newsDialog(null, reloadNews); }, "small primary", "plus")),
+                    panel("invites", P.t("admin.invites"), P.t("admin.invitesHelp"), invitesBox, false, generate),
+                    panel("users", P.t("admin.users"), P.t("admin.usersHelp"), usersBox),
+                    panel("currency", P.t("admin.currencyTitle"), P.t("admin.currencyHelp"), currencyForm()),
+                    panel("security", P.t("admin.security"), P.t("admin.securityHelp"), securityForm(info)),
+                    panel("clients", P.t("admin.clients"), P.t("admin.clientsHelp"), clientsBox),
+                    panel("server", P.t("admin.server"), P.t("admin.serverHelp"), infoBox)));
 
-}
-
-// Escape untrusted config strings before injecting them into the panel.
-function escapeServerInfo(value) {
-    return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
-
-// Build one label + value chip. kind: "text" | "mono" | "bool" | "warn".
-function serverInfoRow(label, value, kind) {
-    var chip;
-
-    if(kind === "bool") {
-        chip = value
-            ? '<div class="server-info-value is-on">Enabled</div>'
-            : '<div class="server-info-value is-off">Disabled</div>';
-    } else {
-        var text = (value === null || value === undefined) ? "" : String(value);
-        if(text.trim() === "") {
-            chip = '<div class="server-info-value is-muted">Not set</div>';
-        } else if(kind === "warn") {
-            chip = '<div class="server-info-value is-warn">' + escapeServerInfo(text) + '</div>';
-        } else if(kind === "mono") {
-            chip = '<div class="server-info-value is-mono">' + escapeServerInfo(text) + '</div>';
-        } else {
-            chip = '<div class="server-info-value">' + escapeServerInfo(text) + '</div>';
-        }
-    }
-
-    return '<div class="server-info-line"><div class="server-info-title">' + escapeServerInfo(label) + '</div>' + chip + '</div>';
-}
-
-// Wrap a set of rows under a small section heading.
-function serverInfoGroup(title, rows) {
-    return '<div class="server-info-group"><div class="server-info-group-title">' + escapeServerInfo(title) + '</div>' + rows.join("") + '</div>';
-}
-
-function place_server_info(server_info) {
-    var groups = [];
-
-    // Application
-    var application = [
-        serverInfoRow("Name", server_info.app_name, "text"),
-        serverInfoRow("Version", server_info.poenskelisten_version, "text"),
-        serverInfoRow("Environment", server_info.poenskelisten_environment, "text"),
-        (server_info.poenskelisten_external_url || "").trim() === ""
-            ? serverInfoRow("External URL", ((server_info.poenskelisten_additional_urls || []).length === 0
-                ? "Not set: login only works from "
-                : "Not set: links and single sign-on use ") + server_info.oauth_issuer, "warn")
-            : serverInfoRow("External URL", server_info.poenskelisten_external_url, "mono"),
-        serverInfoRow("Additional URLs", (server_info.poenskelisten_additional_urls || []).join(", "), "mono"),
-        serverInfoRow("Port", server_info.poenskelisten_port, "text"),
-        serverInfoRow("Timezone", server_info.timezone, "text"),
-        serverInfoRow("Log level", server_info.poenskelisten_log_level, "text")
-    ];
-    if((server_info.poenskelisten_environment || "").toLowerCase() === "test") {
-        application.push(serverInfoRow("Test email", server_info.poenskelisten_test_email, "mono"));
-    }
-    groups.push(serverInfoGroup("Application", application));
-
-    // Database
-    var database = [ serverInfoRow("Type", server_info.database_type, "text") ];
-    if((server_info.database_type || "").toLowerCase() === "sqlite") {
-        database.push(serverInfoRow("File", server_info.database_location, "mono"));
-    } else {
-        database.push(serverInfoRow("Name", server_info.database_name, "text"));
-        database.push(serverInfoRow("Host", server_info.database_host, "mono"));
-        database.push(serverInfoRow("Port", server_info.database_port, "text"));
-        database.push(serverInfoRow("SSL", server_info.database_ssl, "bool"));
-    }
-    groups.push(serverInfoGroup("Database", database));
-
-    // Email
-    var email = [ serverInfoRow("Status", server_info.smtp_enabled, "bool") ];
-    if(server_info.smtp_enabled) {
-        email.push(serverInfoRow("Host", server_info.smtp_host, "mono"));
-        email.push(serverInfoRow("Port", server_info.smtp_port, "text"));
-        email.push(serverInfoRow("From", server_info.smtp_from, "mono"));
-    }
-    groups.push(serverInfoGroup("Email", email));
-
-    // Single sign-on
-    var sso = [ serverInfoRow("Status", server_info.oidc_enabled, "bool") ];
-    if(server_info.oidc_enabled) {
-        sso.push(serverInfoRow("Provider", server_info.oidc_provider_name, "text"));
-        sso.push(serverInfoRow("Issuer", server_info.oidc_issuer_url, "mono"));
-        sso.push(serverInfoRow("Client ID", server_info.oidc_client_id, "mono"));
-        sso.push(serverInfoRow("Redirect URL", server_info.oidc_redirect_url, "mono"));
-        sso.push(serverInfoRow("Auto-create users", server_info.oidc_auto_create_users, "bool"));
-        sso.push(serverInfoRow("Password login", server_info.local_login_enabled, "bool"));
-    }
-    groups.push(serverInfoGroup("Single sign-on", sso));
-
-    // Security
-    groups.push(serverInfoGroup("Security", [
-        serverInfoRow("Require MFA", server_info.mfa_enforced, "bool"),
-        serverInfoRow("Recovery codes", server_info.mfa_recovery_codes_enabled, "bool")
-    ]));
-
-    // AI assistants: registering third-party apps is only possible while MCP is on.
-    var mcp = [ serverInfoRow("Status", server_info.mcp_enabled, "bool") ];
-    if(server_info.mcp_enabled) {
-        mcp.push(serverInfoRow("Endpoint", server_info.mcp_endpoint, "mono"));
-    }
-    mcp.push(serverInfoRow("App registration", server_info.mcp_enabled, "bool"));
-    groups.push(serverInfoGroup("AI assistants (MCP)", mcp));
-
-    document.getElementById("server-info-body").innerHTML = groups.join("");
-
-    // Keep the editable security toggles in sync with the reported state.
-    document.getElementById('mfa-enforced').checked = server_info.mfa_enforced === true
-    document.getElementById('mfa-recovery-codes').checked = server_info.mfa_recovery_codes_enabled === true
-}
-
-function update_server_settings() {
-
-    var mfaEnforced = document.getElementById('mfa-enforced').checked;
-    var mfaRecoveryCodes = document.getElementById('mfa-recovery-codes').checked;
-
-    var form_data = JSON.stringify({ "mfa_enforced" : mfaEnforced, "mfa_recovery_codes_enabled" : mfaRecoveryCodes });
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-
-            if(result.error) {
-                error(result.error);
-            } else {
-                success(result.message)
-                document.getElementById('mfa-enforced').checked = result.mfa_enforced === true
-                document.getElementById('mfa-recovery-codes').checked = result.mfa_recovery_codes_enabled === true
-            }
-
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "admin/server/settings");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send(form_data);
-    return false;
-}
-
-function get_invites() {
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                place_invites(result.invites)
-                
-            }
-
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "admin/invites");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-
-}
-
-function place_invites(invites_array) {
-    var html = ``;
-    
-    if(invites_array.length == 0) {
-        html = `
-            <div id="" class="invitation-object">
-                <p id="" style="margin: 0.5em; text-align: center;">...</p>
-            </div>
-        `;
-    } else {
-        for(var i = 0; i < invites_array.length; i++) {
-            html += `
-                <div id="" class="invitation-object">
-                    <div class="leaderboard-object-code">
-                        Code: ` + invites_array[i].invite_code + `
-                    </div>
-            `;
-
-            if(invites_array[i].invite_used) {
-                html += `
-                        <div class="leaderboard-object-user clickable" onclick="GetUserData('${invites_array[i].user.id}')">
-                            Used by: ` + invites_array[i].user.first_name + ` ` + invites_array[i].user.last_name + `
-                        </div>
-                    `;
-            } else {
-                html += `
-                        <div class="leaderboard-object-user">
-                            Not used
-                        </div>
-                        <img class="icon-img clickable" onclick="delete_invite('${invites_array[i].id}')" src="/assets/trash-2.svg"></img>
-                    `;
-            }
-
-            html += `</div>`;
-
-        }
-        
-    }
-
-    document.getElementById("invite-list").innerHTML = html
-
-    return
-}
-
-function generate_invite() {
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                success(result.message)
-                place_invites(result.invites)
-                
-            }
-
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "admin/invites");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-
-}
-
-function delete_invite(invide_id) {
-
-    if(!confirm("Are you sure you want to delete this invite?")) {
-        return
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                success(result.message)
-                place_invites(result.invites)
-                
-            }
-
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("delete", api_url + "admin/invites/" + invide_id);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-
-}
-
-function get_currency() {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            if(result.error) {
-                error(result.error);
-            } else {
-                //console.log(result)
-                document.getElementById('currency').value = result.currency;
-                document.getElementById('currency-padding').checked = result.padding;
-                document.getElementById('currency-left').checked = result.left;
+            if (window.location.hash) {
+                var target = document.getElementById(window.location.hash.slice(1));
+                if (target) {
+                    target.scrollIntoView();
+                }
             }
         }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/currency");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function update_currency() {
-
-    var currency = document.getElementById('currency').value;
-    var padding = document.getElementById('currency-padding').checked;
-    var left = document.getElementById('currency-left').checked;
-
-    var form_obj = { 
-        "poenskelisten_currency" : currency,
-        "poenskelisten_currency_pad": padding,
-        "poenskelisten_currency_left": left
-    };
-
-    var form_data = JSON.stringify(form_obj);
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-
-                error(result.error);
-
-            } else {
-
-                success(result.message)
-                document.getElementById('currency').value = result.currency;
-                document.getElementById('currency-padding').checked = result.padding;
-                document.getElementById('currency-left').checked = result.left;
-            }
-
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("post", api_url + "admin/currency/update");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send(form_data);
-    return false;
-
-}
-
-function get_oauth_clients() {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            if(result.error) {
-                error(result.error);
-            } else {
-                place_oauth_clients(result.clients);
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "admin/oauth/clients");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function place_oauth_clients(clients) {
-    var html = "";
-    if(!clients || clients.length === 0) {
-        html = `<div class="invitation-object"><p style="margin: 0.5em; text-align: center;">...</p></div>`;
-    } else {
-        for(var i = 0; i < clients.length; i++) {
-            var c = clients[i];
-            var name = (c.client_name && c.client_name.trim() !== "") ? c.client_name : c.client_id;
-            var suffix = c.enabled ? "" : " (revoked)";
-
-            html += `<div class="invitation-object">`;
-            html += `<div class="leaderboard-object-code">${escapeServerInfo(name)}${suffix}</div>`;
-
-            if(c.is_first_party) {
-                html += `<div class="leaderboard-object-user">Built-in</div>`;
-            } else if(c.enabled) {
-                html += `<img class="icon-img clickable" onclick="revoke_oauth_client('${escapeServerInfo(c.client_id)}')" src="/assets/trash-2.svg" title="Revoke"></img>`;
-            } else {
-                html += `<div class="leaderboard-object-user">Revoked</div>`;
-            }
-
-            html += `</div>`;
-        }
-    }
-    document.getElementById("oauth-client-list").innerHTML = html;
-}
-
-function revoke_oauth_client(clientID) {
-    if(!confirm("Revoke this app's access? It will need to be authorized again.")) {
-        return;
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            if(result.error) {
-                error(result.error);
-            } else {
-                success(result.message);
-                get_oauth_clients();
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("delete", api_url + "admin/oauth/clients/" + clientID);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return false;
-}
-
-function GetUserData(userID) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-                error(result.error);
-            } else {
-                PlaceUserDataInModal(result.user)
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/users/" + userID);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-
-    return;
-}
-
-function PlaceUserDataInModal(user_object) {
-    displayName = "Name:  " + user_object.first_name + " " + user_object.last_name
-    email = "Email: " + user_object.email
-
-    // parse date object
-    try {
-        var date = new Date(Date.parse(user_object.created_at));
-        var date_string = GetDateString(date)
-    } catch(e) {
-        var date_string = "Error"
-        console.log("Join date error: " + e)
-    }
-
-    joinedDate = "Joined: " + date_string
-
-    if(user_object.admin) {
-        var admin_string = "Yes"
-    } else {
-        var admin_string = "No"
-    }
-
-    adminString = "Administrator: " + admin_string
-
-    if(user_object.mfa_enabled) {
-        var mfa_string = "Two-factor: Enabled"
-    } else {
-        var mfa_string = "Two-factor: Disabled"
-    }
-
-    var mfaButton = ""
-    if(user_object.mfa_enabled) {
-        mfaButton = `<button id="delete-mfa-button" onClick="adminDeleteUserMFA('${user_object.id}');" type="button" style="margin-top: 0.5em; padding: 0.75em 1em;">Delete two-factor authentication</button>`
-    }
-
-    html = `
-        <div class="user-wrapper">
-            <div class="profile-icon icon-border icon-background" id="wishlist_owner_image_${user_object.id}" style="width: 5em; height: 5em;">
-                <img class="icon-img " src="/assets/user.svg" id="wishlist_owner_image_img_${user_object.id}">
-            </div>
-            <div class="user-infolist">
-                ${displayName}<br>
-                ${email}<br>
-                ${joinedDate}<br>
-                ${adminString}<br>
-                ${mfa_string}<br>
-            </div>
-        </div>
-
-        <div id="user-input" class="user-input" style="width: 100%;">
-            <button id="register-button" onClick="deleteUser('${user_object.id}');" type="" href="/">Delete user</button>
-            ${mfaButton}
-            <button id="revoke-sessions-button" onClick="adminRevokeUserSessions('${user_object.id}');" type="button" style="margin-top: 0.5em; padding: 0.75em 1em;">Sign out everywhere</button>
-        </div>
-    `;
-
-    toggleModal(html);
-    GetProfileImage(user_object.id, `wishlist_owner_image_${user_object.id}`)
-}
-
-function GetProfileImage(userID, divID) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {  
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-                error(result.error);
-            } else {
-                if(!result.default) {
-                    PlaceProfileImage(result.image, divID)
-                } 
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("get", api_url + "auth/users/" + userID + "/image?thumbnail=true");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return;
-}
-
-function PlaceProfileImage(imageBase64, divID) {
-    var image = document.getElementById(divID)
-    image.style.backgroundSize = "cover"
-    image.innerHTML = ""
-    image.style.backgroundImage = `url('${imageBase64}')`
-    image.style.backgroundPosition = "center center"
-}
-
-function adminDeleteUserMFA(userID) {
-    if(!confirm("Remove two-factor authentication for this user? They will be able to log in with just their password.")) {
-        return;
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-
-            if(result.error) {
-                error(result.error);
-            } else {
-                toggleModal(false);
-                success(result.message);
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("delete", api_url + "admin/users/" + userID + "/mfa");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return;
-}
-
-function adminRevokeUserSessions(userID) {
-    if(!confirm("Sign this user out of all their sessions? They will need to log in again everywhere.")) {
-        return;
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-
-            if(result.error) {
-                error(result.error);
-            } else {
-                toggleModal(false);
-                success(result.message);
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("delete", api_url + "admin/users/" + userID + "/sessions");
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return;
-}
-
-function deleteUser(userID) {
-    if(!confirm("Are you sure you want to delete this user?")) {
-        return;
-    }
-
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState == 4) {  
-            try {
-                result = JSON.parse(this.responseText);
-            } catch(e) {
-                console.log(e +' - Response: ' + this.responseText);
-                error("Could not reach API.");
-                return;
-            }
-            
-            if(result.error) {
-                error(result.error);
-            } else {
-                toggleModal(false);
-                get_invites();
-            }
-        }
-    };
-    xhttp.withCredentials = true;
-    xhttp.open("delete", api_url + "admin/users/" + userID);
-    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhttp.setRequestHeader("Authorization", jwt);
-    xhttp.send();
-    return;
-}
+    });
+})();
