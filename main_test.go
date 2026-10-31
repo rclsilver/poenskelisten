@@ -459,13 +459,19 @@ func TestInitRouterProtectsAuthAndAdminGroups(t *testing.T) {
 func TestInitRouterSetsSecurityHeaders(t *testing.T) {
 	router := initRouter(models.ConfigStruct{})
 
-	for _, path := range []string{"/", "/wishlists/public/abc", "/api/auth/me", "/does-not-exist"} {
+	for _, path := range []string{"/", "/login", "/wishlists/public/abc", "/api/auth/me", "/.well-known/oauth-authorization-server", "/does-not-exist"} {
 		w := serve(router, http.MethodGet, path)
 		if got := w.Header().Get("Content-Security-Policy"); got != middlewares.ContentSecurityPolicy {
 			t.Errorf("GET %s Content-Security-Policy = %q, want the shared policy", path, got)
 		}
 		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 			t.Errorf("GET %s X-Content-Type-Options = %q, want nosniff", path, got)
+		}
+		if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+			t.Errorf("GET %s X-Frame-Options = %q, want DENY", path, got)
+		}
+		if got := w.Header().Get("Referrer-Policy"); got != "same-origin" {
+			t.Errorf("GET %s Referrer-Policy = %q, want same-origin", path, got)
 		}
 	}
 }
