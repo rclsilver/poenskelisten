@@ -1,7 +1,3 @@
-// A group (/groups/:id): the lists shared with it and its members. Members
-// share their own lists, create a list already shared with the group, and
-// leave. The owner edits the group, adds and removes members, and deletes it.
-// A list's owner can take it out of the group.
 (function () {
     "use strict";
     var h = P.h;
@@ -15,7 +11,6 @@
         return boxes.filter(function (box) { return box.input.checked; }).map(function (box) { return box.input.value; });
     }
 
-    // pickDialog lets the user tick items and sends them in one request.
     function pickDialog(title, help, load, toBox, empty, submit) {
         var holder = h("div", { class: "choice-list" }, P.loading());
         var boxes = [];

@@ -1,7 +1,3 @@
-// A wishlist (/wishlists/:id): its details, the wishes as picture cards, and
-// what the viewer may do. Owners and collaborators add, edit and delete
-// wishes; owners also delete the list. Group members claim and unclaim; the
-// API never tells owners and collaborators who claimed what.
 (function () {
     "use strict";
     var h = P.h;

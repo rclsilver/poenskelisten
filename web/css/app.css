@@ -1,11 +1,5 @@
-/*
- * Design system: tokens, light and dark themes, layout and components.
- *
- * The theme follows the system unless the user picked one: theme.js sets
- * data-theme="light" or "dark" on <html> before the first paint, and the
- * dark tokens are declared twice so "system" needs no script at all.
- * Every colour pair used for text meets WCAG AA (4.5:1) in both themes.
- */
+/* The dark tokens appear twice so that following the system needs no script:
+   theme.js only sets data-theme when the user picked a theme. */
 
 :root {
     --bg: #f6f3ed;
@@ -82,8 +76,6 @@
     color-scheme: dark;
 }
 
-/* ---------------------------------------------------------------- base */
-
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
@@ -131,8 +123,6 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .nowrap { white-space: nowrap; }
 .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* --------------------------------------------------------------- layout */
-
 .container { width: 100%; max-width: 1280px; margin: 0 auto; padding: 40px 5% 64px; flex: 1; min-width: 0; }
 .container.narrow { max-width: 860px; }
 
@@ -153,8 +143,6 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .section-top { display: flex; gap: 16px; justify-content: space-between; align-items: center; flex-wrap: wrap; margin: 40px 0 20px; }
 .section-top h2 { font-family: var(--serif); font-weight: 400; font-size: 1.9rem; }
 .back { margin-bottom: 16px; }
-
-/* ------------------------------------------------------------ navigation */
 
 .appnav {
     display: flex; align-items: center; justify-content: space-between; gap: 16px 20px;
@@ -183,8 +171,6 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .menu-panel hr { margin: 6px 0; }
 .menu-head { padding: 8px 10px 4px; display: grid; gap: 2px; }
 
-/* ----------------------------------------------------------------- forms */
-
 label, .label { display: block; font-size: 0.875rem; font-weight: 600; }
 .req { color: var(--danger); margin-left: 2px; }
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea {
@@ -211,8 +197,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 legend { padding: 0; font-weight: 650; margin-bottom: 4px; }
 .choice-list { display: grid; gap: 2px; max-height: 280px; overflow: auto; padding: 4px 2px; }
-
-/* --------------------------------------------------------------- buttons */
 
 .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -248,8 +232,6 @@ legend { padding: 0; font-weight: 650; margin-bottom: 4px; }
 .badge.reserved, .badge.warn { background: var(--reservedbg); color: var(--reserved); }
 .badge.danger { background: var(--dangerbg); color: var(--danger); }
 
-/* ---------------------------------------------------------------- panels */
-
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 28px; min-width: 0; }
 .panel > h2 { margin-bottom: 6px; }
 .panel h2 + .help { margin-top: 0; margin-bottom: 16px; }
@@ -272,8 +254,6 @@ legend { padding: 0; font-weight: 650; margin-bottom: 4px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ------------------------------------------------------------------- home */
-
 .hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 40px; align-items: center; margin: 8px 0 24px; }
 .hero h1 { max-width: 16ch; }
 .hero-art { position: relative; height: 300px; display: flex; align-items: center; justify-content: center; }
@@ -289,8 +269,6 @@ legend { padding: 0; font-weight: 650; margin-bottom: 4px; }
 .news-post p { color: var(--muted); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .news-actions { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 6px; }
 
-/* ---------------------------------------------------------- list covers */
-
 .collection { position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); min-width: 0; }
 .collection > a { text-decoration: none; display: flex; flex-direction: column; flex: 1; }
 .collection > a:hover h3 { text-decoration: underline; }
@@ -303,8 +281,6 @@ legend { padding: 0; font-weight: 650; margin-bottom: 4px; }
 .collection-body h3 { font-size: 1.2rem; }
 .collection-body p { color: var(--muted); font-size: 0.875rem; }
 .collection.expired { opacity: 0.75; }
-
-/* ------------------------------------------------------------ list detail */
 
 .list-header { padding-bottom: 24px; border-bottom: 1px solid var(--line); display: grid; gap: 16px; }
 .list-meta { display: flex; gap: 8px 20px; flex-wrap: wrap; color: var(--muted); font-size: 0.875rem; }
@@ -324,8 +300,6 @@ legend { padding: 0; font-weight: 650; margin-bottom: 4px; }
 .category-section > summary .chev { transition: transform 0.15s; }
 .category-section:not([open]) > summary .chev { transform: rotate(-90deg); }
 .category-section:not([open]) > summary { margin-bottom: 0; }
-
-/* ------------------------------------------------------------- wish cards */
 
 .wishgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 .wish-card { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); }
@@ -350,16 +324,12 @@ button.wish-image { cursor: zoom-in; }
 .lightbox { width: min(980px, calc(100vw - 24px)); max-width: none; padding: 16px; }
 .lightbox img { max-height: 78vh; width: auto; margin: 0 auto; border-radius: 8px; }
 
-/* ------------------------------------------------------------- editors */
-
 .editor-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.85fr); gap: 40px; align-items: start; }
 .preview-panel { position: sticky; top: 24px; display: grid; gap: 12px; }
 .preview-panel .wish-card { pointer-events: none; }
 .image-field { display: grid; gap: 10px; }
 .image-field .row { gap: 8px; }
 .destination { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-
-/* -------------------------------------------------------------- people */
 
 .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--surface2); display: inline-grid; place-items: center; font-size: 0.75rem; font-weight: 700; overflow: hidden; flex-shrink: 0; border: 2px solid var(--surface); }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -378,8 +348,6 @@ button.wish-image { cursor: zoom-in; }
 .group-symbol { width: 52px; height: 52px; border-radius: 15px; background: var(--surface2); display: grid; place-items: center; }
 .group-symbol svg { width: 26px; height: 26px; }
 
-/* ------------------------------------------------------------- tables */
-
 .kv { display: grid; gap: 0; }
 .kv-row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 0.9375rem; flex-wrap: wrap; }
 .kv-row:last-child { border-bottom: 0; }
@@ -389,8 +357,6 @@ button.wish-image { cursor: zoom-in; }
 .kv-group h3 { margin-bottom: 4px; }
 .codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px; border: 1px dashed var(--inputline); border-radius: 10px; font-family: var(--mono); }
 .qr { width: 200px; height: 200px; image-rendering: pixelated; background: #fff; padding: 8px; border-radius: 8px; }
-
-/* ------------------------------------------------------------ auth pages */
 
 .auth-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; max-width: 1050px; margin: 0 auto; width: 100%; }
 .auth-visual { display: grid; gap: 22px; }
@@ -403,8 +369,6 @@ button.wish-image { cursor: zoom-in; }
 .auth-links { display: flex; gap: 8px 16px; flex-wrap: wrap; justify-content: space-between; font-size: 0.875rem; }
 .separator { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 0.8125rem; }
 .separator::before, .separator::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-
-/* -------------------------------------------------------- overlays */
 
 dialog {
     width: 580px; max-width: calc(100vw - 32px); max-height: 90dvh; overflow: auto;
@@ -422,8 +386,6 @@ dialog::backdrop { background: var(--overlay); }
 .toast button { background: transparent; border: 0; color: inherit; min-width: 44px; min-height: 44px; border-radius: 8px; font-size: 1.2rem; }
 
 .footer { border-top: 1px solid var(--line); padding: 20px 5%; display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; color: var(--muted); font-size: 0.8125rem; }
-
-/* ------------------------------------------------------- responsive */
 
 @media (min-width: 1400px) {
     .wishgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -482,7 +444,6 @@ dialog::backdrop { background: var(--overlay); }
     .wish-card, .collection, .panel { box-shadow: none; break-inside: avoid; }
 }
 
-/* ------------------------------------------------------ page sections */
 .collection-actions { padding: 0 20px 18px; display: flex; gap: 8px; flex-wrap: wrap; }
 .panel.spaced { margin-top: 40px; }
 .offline-art { border-radius: var(--r); width: 100%; aspect-ratio: 1.25; object-fit: cover; }

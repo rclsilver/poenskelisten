@@ -1,7 +1,5 @@
-// Administration: server information (read only, including the application
-// name, which is a server setting), news, invite codes, users, OAuth
-// clients, currency and security settings. The API checks the admin flag on
-// every call; the page only spares others a page of errors.
+// The API checks the admin flag on every call; the page only spares others
+// a page of errors.
 (function () {
     "use strict";
     var h = P.h;
@@ -12,8 +10,6 @@
             help ? h("p", { class: "help", text: help }) : null,
             body);
     }
-
-    // ------------------------------------------------------------ server info
 
     function value(kind, raw) {
         if (kind === "bool") {
@@ -99,8 +95,6 @@
         ];
     }
 
-    // ------------------------------------------------------------------ news
-
     function newsDialog(post, onDone) {
         var title = h("input", { type: "text", name: "title", required: true, value: post ? post.title : "", attrs: { minlength: 5, maxlength: 200, autocomplete: "off" } });
         var body = h("textarea", { name: "body", required: true, value: post ? post.body : "", attrs: { minlength: 5 } });
@@ -184,8 +178,6 @@
         return load;
     }
 
-    // ----------------------------------------------------------------- users
-
     function userDialog(userID, onChange) {
         var body = h("div", null, P.loading());
         var dialog = P.dialog({ title: P.t("admin.user"), content: body });
@@ -242,8 +234,6 @@
         return load;
     }
 
-    // --------------------------------------------------------------- invites
-
     function invitesList(container, onUser) {
         var draw = function (invites) {
             P.mount(container, invites.length ? invites.map(function (invite) {
@@ -279,8 +269,6 @@
         };
     }
 
-    // ---------------------------------------------------------- OAuth clients
-
     function clientsList(container) {
         var load = function () {
             P.api("GET", "admin/oauth/clients").then(function (result) {
@@ -304,8 +292,6 @@
         };
         load();
     }
-
-    // ------------------------------------------------------ editable settings
 
     function currencyForm() {
         var currency = h("input", { type: "text", name: "currency", required: true, attrs: { maxlength: 10, autocomplete: "off" } });

@@ -1,5 +1,3 @@
-// Home page: a welcome, the five most recently updated active lists, the
-// news feed and a word about groups.
 (function () {
     "use strict";
     var h = P.h;

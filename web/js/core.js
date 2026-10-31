@@ -1,19 +1,11 @@
-// Shared front-end library: safe DOM building, translations, preferences,
-// formatting, API calls, images, dialogs and the rules every page shares
-// (wish sorting, claim states, which lists can take a new wish).
-//
-// Pages never inject markup: P.h builds elements and sets text through
-// textContent, so names, notes and URLs coming from users can't become
-// HTML. Only preferences (language, theme, wish sorting) go to
-// localStorage, never a token. The file has no dependency and no template
-// action, so tests/web can load it in Node.
+// Library shared by the pages. Pages never inject markup: P.h sets user values
+// with textContent. Only preferences go to localStorage, never a token. No
+// template action here, so tests/web can load the file in Node.
 (function (root) {
     "use strict";
 
     var P = {};
     var doc = root.document;
-
-    // ------------------------------------------------------------ preferences
 
     var PREF_KEYS = {
         lang: "poenskelistenLang",
@@ -42,14 +34,10 @@
         }
     };
 
-    // ----------------------------------------------------------- translations
-
     P.LANGS = ["en", "fr"];
     P.lang = "en";
     var dictionary = {};
 
-    // detectLang picks the saved language, else the first browser language we
-    // have a dictionary for, else English.
     P.detectLang = function (saved, browserLangs) {
         if (P.LANGS.indexOf(saved) !== -1) {
             return saved;
@@ -85,16 +73,12 @@
         });
     }
 
-    // t returns the translation of key, with {name} placeholders filled from
-    // vars ({app} is always the application name). A missing key shows the
-    // key itself, which tests/web and main_test.go make sure never ships.
+    // A missing key shows as is; main_test.go makes sure none ships.
     P.t = function (key, vars) {
         var text = Object.prototype.hasOwnProperty.call(dictionary, key) ? dictionary[key] : key;
         return interpolate(String(text), vars);
     };
 
-    // tn picks key.one or key.other with the language's plural rules and
-    // passes the count as {n}.
     P.tn = function (key, n, vars) {
         var form = "other";
         try {
@@ -109,8 +93,7 @@
         return P.t(key + "." + form, all);
     };
 
-    // applyI18n translates the static markup of the templates: data-i18n sets
-    // the text, data-i18n-attr lists "attribute:key" pairs separated by ";".
+    // data-i18n-attr holds "attribute:key" pairs separated by ";".
     P.applyI18n = function (scope) {
         var base = scope || doc;
         base.querySelectorAll("[data-i18n]").forEach(function (el) {
@@ -142,11 +125,8 @@
             });
     };
 
-    // -------------------------------------------------------------- app name
-
-    // The name comes from the server's configuration through the
-    // application-name meta tag, which html/template escaped; reading it back
-    // with .content gives the original text for textContent use.
+    // The name is read back from the meta tag html/template escaped, never
+    // embedded in the script.
     P.appName = function () {
         var meta = doc && doc.querySelector('meta[name="application-name"]');
         var name = meta ? meta.getAttribute("content") : "";
@@ -156,8 +136,6 @@
     P.setTitle = function (title) {
         doc.title = title ? title + " · " + P.appName() : P.appName();
     };
-
-    // ------------------------------------------------------------------- DOM
 
     var SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -187,7 +165,6 @@
         return P.safeExternalUrl(text) || "#";
     };
 
-    // safeImageSrc allows same-origin assets, image data URLs and blob URLs.
     P.safeImageSrc = function (value) {
         var text = String(value || "");
         if (/^\/(?![\/\\])/.test(text) || /^blob:/.test(text) || P.isImageDataUrl(text)) {
@@ -196,11 +173,8 @@
         return "";
     };
 
-    // h builds an element. props: class, text, on {event: handler}, dataset,
-    // attrs {name: value} for setAttribute, and any other key is assigned as a
-    // property (type, value, checked, disabled, id, name, ...). href and src
-    // go through safeLink/safeImageSrc. Inline handlers and HTML injection are
-    // refused outright.
+    // href and src go through safeLink and safeImageSrc; inline handlers and
+    // markup are refused.
     P.h = function (tag, props) {
         var el = doc.createElement(tag);
         var options = props || {};
@@ -313,9 +287,6 @@
         return svg;
     };
 
-    // button builds a <button type="button">. kind: "primary", "quiet",
-    // "danger", "small"... (space separated). label is visible text; an
-    // icon-only button passes label as its accessible name.
     P.button = function (label, onClick, kind, iconName, extra) {
         var iconOnly = /(^|\s)icon(\s|$)/.test(kind || "");
         var props = { type: "button", class: "btn " + (kind || ""), on: { click: onClick } };
@@ -328,8 +299,6 @@
         }
         return P.h("button", props, iconName ? P.icon(iconName) : null, iconOnly ? null : label);
     };
-
-    // ------------------------------------------------------------ URL safety
 
     // safeExternalUrl accepts http(s) URLs only. A bare "shop.example/item" is
     // read as https, the same way the server validates wish links.
@@ -364,8 +333,7 @@
         return "/";
     };
 
-    // externalLink renders a product link that opens in a new tab without
-    // giving the shop a handle on this page or the referring URL.
+    // noreferrer also keeps the list's URL out of the shop's logs.
     P.externalLink = function (raw, label, className) {
         var url = P.safeExternalUrl(raw);
         if (!url) {
@@ -379,8 +347,6 @@
             attrs: { referrerpolicy: "no-referrer" }
         }, P.icon("external"), label);
     };
-
-    // ------------------------------------------------------------ formatting
 
     P.parseDate = function (value) {
         if (!value) {
@@ -427,8 +393,6 @@
         return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
     };
 
-    // fmtPrice follows the admin's currency settings: symbol, left or right,
-    // padded with a space or not. No price, or zero, shows nothing.
     P.fmtPrice = function (price, currency) {
         if (price === null || price === undefined || Number(price) === 0 || isNaN(Number(price))) {
             return "";
@@ -466,8 +430,6 @@
         return (first + last).toUpperCase() || "?";
     };
 
-    // ------------------------------------------------------------------- API
-
     function ApiError(message, status) {
         this.name = "ApiError";
         this.message = message;
@@ -476,12 +438,10 @@
     ApiError.prototype = Object.create(Error.prototype);
     P.ApiError = ApiError;
 
-    // token is set by the session code once an access token is known.
     P.token = "";
 
-    // api calls /api/<path>. It resolves with the decoded JSON and rejects
-    // with an ApiError carrying the server's message. A 401 tries one token
-    // refresh (P.onUnauthorized, provided by session.js) before giving up.
+    // A 401 means the token expired between two refreshes: retry once with a
+    // fresh one.
     P.api = function (method, path, body, options) {
         var opts = options || {};
         var headers = { "Accept": "application/json" };
@@ -521,8 +481,6 @@
         });
     };
 
-    // ---------------------------------------------------------------- images
-
     P.MAX_IMAGE_BYTES = 10000000;
     P.IMAGE_TYPES = ["image/jpeg", "image/png"];
 
@@ -530,8 +488,7 @@
         return typeof value === "string" && /^data:image\/(jpeg|png|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
     };
 
-    // checkImageFile gives a quick answer before uploading. The server checks
-    // the type, size and dimensions again and re-encodes the image.
+    // A quick answer only: the server checks the image again and re-encodes it.
     P.checkImageFile = function (file) {
         if (!file) {
             return null;
@@ -545,8 +502,6 @@
         return null;
     };
 
-    // readImageFile resolves with a data URL the API accepts, after making
-    // sure the browser can decode the file.
     P.readImageFile = function (file) {
         var problem = P.checkImageFile(file);
         if (problem) {
@@ -572,7 +527,6 @@
 
     var imageCache = {};
 
-    // wishImage resolves with the image data URL of a wish, or null.
     P.wishImage = function (wishID, thumbnail) {
         var key = wishID + (thumbnail ? ":t" : ":f");
         if (!imageCache[key]) {
@@ -593,9 +547,7 @@
         delete imageCache[wishID + ":f"];
     };
 
-    // profileImage resolves with the user's picture, or null for the default.
-    // Pages show the same people many times (members, owners), so each
-    // picture is asked for once per page.
+    // The same people show up many times on a page (members, owners).
     var profileCache = {};
     P.profileImage = function (userID, thumbnail) {
         var key = userID + (thumbnail ? ":t" : ":f");
@@ -611,8 +563,6 @@
         return profileCache[key];
     };
 
-    // lazyImage fills holder with the image once loader resolves, and only
-    // asks for it when the holder scrolls into view.
     P.lazyImage = function (holder, loader, alt) {
         var start = function () {
             loader().then(function (src) {
@@ -648,8 +598,6 @@
         return holder;
     };
 
-    // --------------------------------------------------------------- overlays
-
     function toastHost() {
         var host = doc.getElementById("toasts");
         if (!host) {
@@ -659,8 +607,6 @@
         return host;
     }
 
-    // toast shows a short message; errors stay longer and are announced
-    // assertively.
     P.toast = function (message, kind) {
         var isError = kind === "error";
         var item = P.h("div", { class: "toast" + (isError ? " error" : ""), role: isError ? "alert" : "status" });
@@ -679,10 +625,8 @@
         P.toast(err && err.message ? err.message : P.t("error.server"), "error");
     };
 
-    // dialog opens a modal <dialog>. content is a node or a list of nodes;
-    // actions are {label, kind, onClick} where onClick may return a promise
-    // and returns false to keep the dialog open. Escape and the close button
-    // dismiss it; focus returns to where it was.
+    // An action's onClick may return a promise; resolving to false keeps the
+    // dialog open.
     P.dialog = function (options) {
         var previous = doc.activeElement;
         var titleID = "dialog-title-" + Math.random().toString(36).slice(2);
@@ -743,7 +687,6 @@
         return { el: dialog, close: close };
     };
 
-    // confirm asks a yes/no question and resolves with true on confirmation.
     P.confirm = function (options) {
         return new Promise(function (resolve) {
             var confirmed = false;
@@ -759,7 +702,6 @@
         });
     };
 
-    // lightbox shows a wish image full size.
     P.lightbox = function (loader, alt) {
         var body = P.h("div", { class: "loading" }, P.h("div", { class: "spinner", role: "status", "aria-label": P.t("state.loading") }));
         P.dialog({ title: alt, content: body, className: "lightbox" });
@@ -773,7 +715,6 @@
         });
     };
 
-    // busy disables a button while promise runs.
     P.busy = function (button, promise) {
         if (button) {
             button.disabled = true;
@@ -795,7 +736,6 @@
         return P.h("div", { class: "empty" }, P.h("p", { text: message }), action || null);
     };
 
-    // copyText copies to the clipboard, falling back to selecting the input.
     P.copyText = function (text, input) {
         var done = function () { P.toast(P.t("share.copied")); };
         if (root.navigator && root.navigator.clipboard && root.navigator.clipboard.writeText) {
@@ -810,8 +750,6 @@
         }
         return Promise.resolve();
     };
-
-    // ------------------------------------------------------- wishes and lists
 
     P.wishDateValue = function (wish) {
         var value = Date.parse(wish.updated_at);
@@ -890,8 +828,6 @@
         return prefs.explicit ? prefs.layout : "grouped";
     };
 
-    // bucketWishes groups wishes by category, categories in their manual
-    // order (then by name), uncategorized wishes last.
     P.bucketWishes = function (list) {
         var byID = {};
         var order = [];
@@ -935,8 +871,6 @@
         return !!(wishlist.expires && date && date.getTime() < (now || new Date()).getTime());
     };
 
-    // eligibleWishlists are the lists a new wish can go to: active ones the
-    // user owns or collaborates on.
     P.eligibleWishlists = function (lists, userID, now) {
         return (lists || []).filter(function (wishlist) {
             var role = P.wishlistRole(wishlist, userID);
@@ -975,7 +909,6 @@
         return { state: mine ? "mine" : "other", claimer: mine ? null : claims[0].user };
     };
 
-    // canManageWish: list owner, collaborators and the wish's author.
     P.canManageWish = function (wish, userID) {
         if (!userID) {
             return false;
@@ -993,8 +926,6 @@
         var base = String(baseURL || "").replace(/\/+$/, "") || root.location.origin;
         return base + "/wishlists/public/" + encodeURIComponent(hash);
     };
-
-    // ------------------------------------------------------------- page frame
 
     P.user = null;
 
@@ -1017,7 +948,6 @@
         root.location.reload();
     };
 
-    // prefsMenu wires the theme and language controls in the header.
     function wirePrefs() {
         var themeSelect = doc.getElementById("pref-theme");
         var langSelect = doc.getElementById("pref-lang");
@@ -1030,8 +960,7 @@
             langSelect.value = P.lang;
             langSelect.addEventListener("change", function () { P.setLang(langSelect.value); });
         }
-        // Header menus close on a click elsewhere or on Escape, which also
-        // gives the focus back to the menu button.
+        // Escape gives the focus back to the menu button.
         doc.addEventListener("click", function (event) {
             doc.querySelectorAll("details.menu").forEach(function (menu) {
                 if (menu.open && !menu.contains(event.target)) {
@@ -1060,7 +989,6 @@
         return P.h("a", { href: href, class: "btn quiet", "aria-current": current ? "page" : null, text: P.t(key) });
     }
 
-    // renderNav fills the header for a signed-in user, or with sign-in links.
     P.renderNav = function (user, options) {
         var links = doc.getElementById("nav-links");
         var account = doc.getElementById("nav-account");
@@ -1091,8 +1019,6 @@
         }
     };
 
-    // page runs a page once translations are loaded. init receives the main
-    // element. Signed-in pages go through startSession (session.js) first.
     P.page = function (options) {
         var start = function () {
             P.loadI18n().then(function () {
@@ -1134,7 +1060,6 @@
             actions ? P.h("div", { class: "row" }, actions) : null);
     };
 
-    // authLayout is the frame of the sign-in pages: a welcome column and a card.
     P.authLayout = function (main, title, intro, card, art) {
         P.mount(main, P.h("div", { class: "auth-layout" },
             P.h("section", { class: "auth-visual" },
@@ -1149,7 +1074,6 @@
         return P.h("a", { href: href, class: "btn quiet back" }, P.icon("arrowLeft"), label);
     };
 
-    // field builds a labelled control with optional help text.
     P.field = function (label, control, help, required) {
         var id = control.id || "f-" + Math.random().toString(36).slice(2);
         control.id = id;
@@ -1176,7 +1100,6 @@
         };
     };
 
-    // formError shows a message in the form's alert region.
     P.formError = function (form, message) {
         var region = form.querySelector(".form-error");
         if (!region) {

@@ -1,6 +1,4 @@
-// Service worker: shows the offline page when a page can't be loaded, and
-// displays push notifications. It never caches API answers or anything
-// personal: only the offline page and the static files it needs.
+// Never caches API answers or anything personal.
 
 // Incrementing OFFLINE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
@@ -8,7 +6,6 @@ const OFFLINE_VERSION = 2;
 const CACHE_NAME = 'poenskelisten-cache-v' + OFFLINE_VERSION;
 // Page returned from the cache when a navigation fails while offline.
 const OFFLINE_URL = '/offline';
-// The offline page and what it loads.
 const urlsToCache = [
     OFFLINE_URL,
     '/manifest.json',
@@ -61,7 +58,6 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
-    // Pages: network first, the offline page when the network is down.
     if (event.request.mode === 'navigate') {
         event.respondWith((async () => {
             try {
@@ -86,8 +82,7 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // The offline page's own files: network first so they stay current,
-    // the cached copy when offline. Nothing else is ever served from cache.
+    // Nothing else is ever served from cache.
     if (event.request.method === 'GET' && url.origin === self.location.origin && urlsToCache.includes(url.pathname)) {
         event.respondWith((async () => {
             try {

@@ -1,6 +1,5 @@
-// E-mail verification, reached from /oauth/authorize while the account isn't
-// verified yet. Both calls ride on the SSO session cookie: there is no access
-// token until the account is verified.
+// Both calls ride on the SSO session cookie: there is no access token until
+// the account is verified.
 (function () {
     "use strict";
     var h = P.h;
@@ -14,7 +13,6 @@
                 event.preventDefault();
                 P.formError(form, "");
                 P.busy(button, P.api("POST", "open/users/verify/" + encodeURIComponent(code.value.trim()))).then(function () {
-                    // Verified: the OAuth flow now succeeds.
                     window.location.href = "/";
                 }, function (err) {
                     P.formError(form, err.message);
