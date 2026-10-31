@@ -1,90 +1,168 @@
 package middlewares
 
 import (
+	"aunefyren/poenskelisten/logger"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
+	logrusTest "github.com/sirupsen/logrus/hooks/test"
 )
 
-func allowed(limiter *rateLimiter, key string) bool {
-	ok, _ := limiter.allow(key)
-	return ok
-}
+// fakeClock lets a test move a limiter's time forward without sleeping.
+type fakeClock struct{ now time.Time }
 
-// fakeClock lets a test move the limiter's time forward without sleeping.
-func fakeClock(limiter *rateLimiter) *time.Time {
-	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	limiter.now = func() time.Time { return now }
-	limiter.lastSweep = now
-	return &now
+func (c *fakeClock) Now() time.Time          { return c.now }
+func (c *fakeClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
+
+func newTestLimiter(max int, window time.Duration) (*rateLimiter, *fakeClock) {
+	clock := &fakeClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	limiter := newRateLimiter(max, window)
+	limiter.now = clock.Now
+	return limiter, clock
 }
 
 func TestRateLimiterAllowsUpToMax(t *testing.T) {
-	limiter := newRateLimiter(3, time.Minute)
+	limiter, _ := newTestLimiter(3, time.Minute)
 
 	for i := 0; i < 3; i++ {
-		if !allowed(limiter, "1.2.3.4") {
+		if allowed, _, _ := limiter.allow("1.2.3.4"); !allowed {
 			t.Fatalf("request %d should be allowed", i+1)
 		}
 	}
-	if allowed(limiter, "1.2.3.4") {
+	if allowed, _, _ := limiter.allow("1.2.3.4"); allowed {
 		t.Error("request over the limit should be blocked")
 	}
 }
 
 func TestRateLimiterPerKey(t *testing.T) {
-	limiter := newRateLimiter(1, time.Minute)
+	limiter, _ := newTestLimiter(1, time.Minute)
 
-	if !allowed(limiter, "a") {
+	if allowed, _, _ := limiter.allow("a"); !allowed {
 		t.Error("first request for key a should be allowed")
 	}
-	if allowed(limiter, "a") {
+	if allowed, _, _ := limiter.allow("a"); allowed {
 		t.Error("second request for key a should be blocked")
 	}
 	// A different key has its own budget.
-	if !allowed(limiter, "b") {
+	if allowed, _, _ := limiter.allow("b"); !allowed {
 		t.Error("first request for key b should be allowed")
 	}
 }
 
-func TestRateLimiterWindowExpiry(t *testing.T) {
-	limiter := newRateLimiter(1, 20*time.Millisecond)
+func TestRateLimiterWindowSlides(t *testing.T) {
+	limiter, clock := newTestLimiter(2, time.Minute)
 
-	if !allowed(limiter, "k") {
-		t.Fatal("first request should be allowed")
+	limiter.allow("k")
+	clock.Advance(40 * time.Second)
+	limiter.allow("k")
+
+	allowed, retryAfter, first := limiter.allow("k")
+	if allowed {
+		t.Fatal("third request within the window should be blocked")
 	}
-	if allowed(limiter, "k") {
-		t.Fatal("second request within window should be blocked")
+	if retryAfter != 20*time.Second {
+		t.Errorf("retryAfter = %v, want 20s (until the first hit leaves the window)", retryAfter)
 	}
-	time.Sleep(30 * time.Millisecond)
-	if !allowed(limiter, "k") {
-		t.Error("request after the window should be allowed again")
+	if !first {
+		t.Error("the first refusal should be reported as such")
+	}
+	if _, _, first := limiter.allow("k"); first {
+		t.Error("a second refusal in the same window shouldn't be reported as the first")
+	}
+
+	clock.Advance(21 * time.Second)
+	if allowed, _, _ := limiter.allow("k"); !allowed {
+		t.Error("once the first hit has left the window, a request should be allowed again")
+	}
+	if allowed, _, _ := limiter.allow("k"); allowed {
+		t.Error("the second hit is still in the window, so the budget is full again")
 	}
 }
 
-func rateLimitTestContext() *gin.Context {
-	ctx, _ := rateLimitTestRecorder()
-	return ctx
+// Refused requests don't count: a client that keeps hammering is let back in
+// as soon as its earlier, allowed requests age out.
+func TestRateLimiterRefusalsDontExtendTheBlock(t *testing.T) {
+	limiter, clock := newTestLimiter(1, time.Minute)
+
+	limiter.allow("k")
+	for i := 0; i < 5; i++ {
+		clock.Advance(10 * time.Second)
+		limiter.allow("k")
+	}
+	clock.Advance(11 * time.Second)
+	if allowed, _, _ := limiter.allow("k"); !allowed {
+		t.Error("request should be allowed once the only allowed hit has left the window")
+	}
 }
 
-// rateLimitTestRecorder is rateLimitTestContext for tests that inspect the
-// response, all from the same client IP.
-func rateLimitTestRecorder() (*gin.Context, *httptest.ResponseRecorder) {
+func TestRateLimiterSweepsStaleKeys(t *testing.T) {
+	limiter, clock := newTestLimiter(5, time.Minute)
+
+	for _, key := range []string{"a", "b", "c"} {
+		limiter.allow(key)
+	}
+	clock.Advance(2 * time.Minute)
+	limiter.allow("d")
+
+	if len(limiter.entries) != 1 {
+		t.Errorf("tracked keys = %d, want 1 after the others expired", len(limiter.entries))
+	}
+}
+
+func TestRateLimiterRefusesNewKeysWhenFull(t *testing.T) {
+	limiter, clock := newTestLimiter(5, time.Minute)
+	for i := 0; i < maxTrackedKeys; i++ {
+		limiter.entries[strconv.Itoa(i)] = &rateLimitEntry{hits: []time.Time{clock.Now()}}
+	}
+	limiter.nextSweep = clock.Now().Add(time.Minute)
+
+	if allowed, _, _ := limiter.allow("newcomer"); allowed {
+		t.Error("a new key should be refused while the limiter is full of live keys")
+	}
+	if allowed, _, _ := limiter.allow("0"); !allowed {
+		t.Error("a tracked key should still be served while the limiter is full")
+	}
+
+	clock.Advance(2 * time.Minute)
+	if allowed, _, _ := limiter.allow("newcomer"); !allowed {
+		t.Error("a new key should be allowed once the stale keys are swept")
+	}
+}
+
+func rateLimitTestContext(remoteAddr string) (*gin.Context, *httptest.ResponseRecorder) {
 	w := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(w)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx.Request.RemoteAddr = "203.0.113.1:12345"
+	ctx.Request.RemoteAddr = remoteAddr
 	return ctx, w
+}
+
+func TestClientKeyGroupsIPv6ByNetwork(t *testing.T) {
+	cases := []struct{ remoteAddr, want string }{
+		{"203.0.113.1:12345", "203.0.113.1"},
+		{"[2001:db8:1:2:aaaa::1]:443", "2001:db8:1:2::/64"},
+		{"[2001:db8:1:2:bbbb::9]:443", "2001:db8:1:2::/64"},
+		{"[2001:db8:1:3::1]:443", "2001:db8:1:3::/64"},
+		{"[::ffff:203.0.113.1]:443", "203.0.113.1"},
+	}
+	for _, c := range cases {
+		ctx, _ := rateLimitTestContext(c.remoteAddr)
+		if got := clientKey(ctx); got != c.want {
+			t.Errorf("clientKey(%s) = %q, want %q", c.remoteAddr, got, c.want)
+		}
+	}
 }
 
 func TestRateLimitMiddlewareAllowsWithinLimit(t *testing.T) {
 	handler := RateLimit(2, time.Minute)
 
-	ctx := rateLimitTestContext()
+	ctx, _ := rateLimitTestContext("203.0.113.1:12345")
 	handler(ctx)
 	if ctx.IsAborted() {
 		t.Error("first request should not be aborted")
@@ -92,131 +170,109 @@ func TestRateLimitMiddlewareAllowsWithinLimit(t *testing.T) {
 }
 
 func TestRateLimitMiddlewareBlocksOverLimit(t *testing.T) {
+	original := logger.Log
+	t.Cleanup(func() { logger.Log = original })
+	var hook *logrusTest.Hook
+	logger.Log, hook = logrusTest.NewNullLogger()
+
 	handler := RateLimit(1, time.Minute)
 
-	first := rateLimitTestContext()
+	first, _ := rateLimitTestContext("203.0.113.1:12345")
 	handler(first)
 	if first.IsAborted() {
 		t.Fatal("first request should not be aborted")
 	}
 
 	// Same middleware instance (same limiter state), same client IP.
-	second := rateLimitTestContext()
+	for i := 0; i < 2; i++ {
+		second, w := rateLimitTestContext("203.0.113.1:12345")
+		handler(second)
+		if !second.IsAborted() {
+			t.Error("request over the limit should be aborted")
+		}
+		if w.Code != http.StatusTooManyRequests {
+			t.Errorf("status = %d, want 429", w.Code)
+		}
+		if retry := w.Header().Get("Retry-After"); retry != "60" {
+			t.Errorf("Retry-After = %q, want 60", retry)
+		}
+		var body map[string]string
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if body["error"] != "rate_limited" {
+			t.Errorf("error = %q, want the OAuth-style rate_limited", body["error"])
+		}
+	}
+
+	warnings := 0
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel {
+			warnings++
+		}
+	}
+	if warnings != 1 {
+		t.Errorf("warnings = %d, want one per client and window", warnings)
+	}
+}
+
+func TestAPIRateLimitHasReadableError(t *testing.T) {
+	original := logger.Log
+	t.Cleanup(func() { logger.Log = original })
+	logger.Log, _ = logrusTest.NewNullLogger()
+
+	handler := APIRateLimit(1, time.Minute)
+	first, _ := rateLimitTestContext("203.0.113.1:12345")
+	handler(first)
+
+	second, w := rateLimitTestContext("203.0.113.1:12345")
 	handler(second)
-	if !second.IsAborted() {
-		t.Error("second request over the limit should be aborted")
+	var body map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusTooManyRequests || body["error"] == "" || body["error"] == "rate_limited" {
+		t.Errorf("got %d %v, want 429 with a message the web app can show", w.Code, body)
 	}
-	if second.Writer.Status() != http.StatusTooManyRequests {
-		t.Errorf("status = %d, want 429", second.Writer.Status())
-	}
-}
 
-func TestRateLimiterRetryAfterCountsFromOldestHit(t *testing.T) {
-	limiter := newRateLimiter(2, time.Minute)
-	now := fakeClock(limiter)
-
-	limiter.allow("k")
-	*now = now.Add(20 * time.Second)
-	limiter.allow("k")
-	*now = now.Add(10 * time.Second)
-
-	ok, retryAfter := limiter.allow("k")
-	if ok {
-		t.Fatal("third request should be blocked")
-	}
-	// The first hit leaves the window 60s after it was made, 30s from now.
-	if retryAfter != 30*time.Second {
-		t.Errorf("retryAfter = %v, want 30s", retryAfter)
+	// Another address isn't affected.
+	other, _ := rateLimitTestContext("203.0.113.2:12345")
+	handler(other)
+	if other.IsAborted() {
+		t.Error("a different client should have its own budget")
 	}
 }
 
-func TestRateLimiterSweepDropsIdleKeys(t *testing.T) {
-	limiter := newRateLimiter(5, time.Minute)
-	now := fakeClock(limiter)
-
-	limiter.allow("idle")
-	*now = now.Add(30 * time.Second)
-	limiter.allow("active")
-
-	// One window after the last sweep, "idle" has no hit left inside the window
-	// but "active" does.
-	*now = now.Add(31 * time.Second)
-	limiter.allow("trigger")
-
-	if _, ok := limiter.hits["idle"]; ok {
-		t.Error("idle key should have been swept")
-	}
-	if _, ok := limiter.hits["active"]; !ok {
-		t.Error("active key should be kept")
-	}
-	if _, ok := limiter.hits["trigger"]; !ok {
-		t.Error("key hit during the sweep should be kept")
+func TestRateLimitOffWhenMaxIsZero(t *testing.T) {
+	handler := APIRateLimit(0, time.Minute)
+	for i := 0; i < 50; i++ {
+		ctx, _ := rateLimitTestContext("203.0.113.1:12345")
+		handler(ctx)
+		if ctx.IsAborted() {
+			t.Fatalf("request %d aborted with the limit off", i+1)
+		}
 	}
 }
 
-func TestRateLimiterSweepWaitsAWindow(t *testing.T) {
-	limiter := newRateLimiter(5, time.Minute)
-	now := fakeClock(limiter)
+// Every route given the same handler shares one budget, which is how the
+// login, MFA and reset endpoints are limited together.
+func TestRateLimitSharedAcrossRoutes(t *testing.T) {
+	original := logger.Log
+	t.Cleanup(func() { logger.Log = original })
+	logger.Log, _ = logrusTest.NewNullLogger()
 
-	limiter.allow("old")
-	// Expired, but less than a window since the last sweep: left alone for now.
-	*now = now.Add(time.Minute)
-	limiter.lastSweep = now.Add(-time.Second)
-	limiter.allow("other")
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	limit := APIRateLimit(2, time.Minute)
+	ok := func(ctx *gin.Context) { ctx.Status(http.StatusOK) }
+	router.POST("/login", limit, ok)
+	router.POST("/mfa", limit, ok)
 
-	if _, ok := limiter.hits["old"]; !ok {
-		t.Error("sweep should not run more than once per window")
+	codes := []int{}
+	for _, path := range []string{"/login", "/mfa", "/login"} {
+		w := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.RemoteAddr = "203.0.113.1:12345"
+		router.ServeHTTP(w, request)
+		codes = append(codes, w.Code)
 	}
-}
-
-func TestRateLimitMiddlewareSetsRetryAfter(t *testing.T) {
-	handler := RateLimit(1, time.Minute)
-
-	handler(rateLimitTestContext())
-	ctx, w := rateLimitTestRecorder()
-	handler(ctx)
-
-	got := w.Header().Get("Retry-After")
-	if got != "60" {
-		t.Errorf("Retry-After = %q, want \"60\"", got)
-	}
-}
-
-func TestRateLimitBodies(t *testing.T) {
-	cases := []struct {
-		name    string
-		handler gin.HandlerFunc
-		want    map[string]string
-	}{
-		{"oauth", RateLimit(1, time.Minute), map[string]string{
-			"error":             "rate_limited",
-			"error_description": "Too many requests. Please try again later.",
-		}},
-		{"api", RateLimitAPI(1, time.Minute), map[string]string{
-			"error": "Too many attempts. Please wait a while and try again.",
-		}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			c.handler(rateLimitTestContext())
-			ctx, w := rateLimitTestRecorder()
-			c.handler(ctx)
-
-			if w.Code != http.StatusTooManyRequests {
-				t.Fatalf("status = %d, want 429", w.Code)
-			}
-			var body map[string]string
-			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-				t.Fatalf("body is not JSON: %v", err)
-			}
-			if len(body) != len(c.want) {
-				t.Errorf("body = %v, want %v", body, c.want)
-			}
-			for key, value := range c.want {
-				if body[key] != value {
-					t.Errorf("body[%q] = %q, want %q", key, body[key], value)
-				}
-			}
-		})
+	if codes[0] != 200 || codes[1] != 200 || codes[2] != 429 {
+		t.Errorf("codes = %v, want [200 200 429]", codes)
 	}
 }

@@ -40,6 +40,9 @@ argCount=$#
 [ -n "$accesstokenminutes" ] && set -- "$@" --accesstokenminutes "$accesstokenminutes"
 [ -n "$refreshtokendays" ] && set -- "$@" --refreshtokendays "$refreshtokendays"
 [ -n "$maximagepixels" ] && set -- "$@" --maximagepixels "$maximagepixels"
+[ -n "$ratelimitlogin" ] && set -- "$@" --ratelimitlogin "$ratelimitlogin"
+[ -n "$ratelimitoauth" ] && set -- "$@" --ratelimitoauth "$ratelimitoauth"
+[ -n "$ratelimitregister" ] && set -- "$@" --ratelimitregister "$ratelimitregister"
 
 # Add OIDC single sign-on flags if those environment variables are set
 [ -n "$oidcenabled" ] && set -- "$@" --oidcenabled "$oidcenabled"

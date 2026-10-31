@@ -112,6 +112,9 @@ You can configure Pønskelisten in **three different ways**:
 | smtp_password | smtppassword | smtppassword | string | SMTP password |
 | smtp_from | smtpfrom | smtpfrom | string | Sender email address |
 | mfa_enforced | mfaenforced | mfaenforced | bool | Require all local users to enroll in MFA (TOTP) |
+| rate_limit_login | ratelimitlogin | ratelimitlogin | string | Requests per visitor address, shared by login, the MFA step, registration, password reset and e-mail verification (and the password checks on the account page), as `<requests>/<duration>`, or `off`. Default `20/15m`. See [Rate limits](#rate-limits) |
+| rate_limit_oauth | ratelimitoauth | ratelimitoauth | string | Requests per visitor address, shared by `/oauth/authorize`, `/oauth/consent`, `/oauth/token` and `/oauth/revoke`, or `off`. Default `60/1m` |
+| rate_limit_register | ratelimitregister | ratelimitregister | string | App registrations (`/oauth/register`) per visitor address, or `off`. Default `10/1h` |
 | mfa_recovery_codes_enabled | mfarecoverycodes | mfarecoverycodes | bool | Issue single-use recovery codes on MFA enrollment (default off; when off, an admin must remove MFA for locked-out users) |
 | access_token_minutes | accesstokenminutes | accesstokenminutes | int | Minutes an access token is valid, `1`–`60` (default: `15`). Signing out (or "sign out everywhere") takes effect once the current access token expires, so a longer lifetime delays it |
 | refresh_token_days | refreshtokendays | refreshtokendays | int | Days a login lasts before users must sign in again, `1`–`365` (default: `7`). Also applies to connected apps (MCP clients) |
@@ -147,6 +150,16 @@ Decoding an image takes memory in proportion to its pixel count, not its file si
 Images being decoded share a budget of twice that amount, so decoding takes at most about 760 MB above the app's usual use at the default. Allow a little more in practice, since Go reuses freed memory rather than returning it to the system immediately. Further uploads wait for their turn for up to 30 seconds, then get a "server busy" error, and each account can have one upload being decoded at a time. Lowering `max_image_pixels` lowers all of this roughly in proportion, at the cost of refusing larger photos.
 
 In a container with a memory limit, also set the `GOMEMLIMIT` environment variable a little below that limit, for example `GOMEMLIMIT=900MiB` for a 1 GiB limit, which is enough at the default `max_image_pixels`. Go then collects garbage harder as memory use nears that amount, rather than letting the container be killed for running out of memory. It cannot free memory that is still in use, so it complements a suitable limit rather than replacing it.
+
+### Rate limits
+
+Password and code checks are rate-limited per visitor address (IPv6 addresses are grouped by `/64`), with a sliding window. Requests over a limit get `429 Too Many Requests` and a `Retry-After` header, and the first refusal per address and window is logged as a warning.
+
+- `rate_limit_login` (default `20/15m`): login, the MFA step, registration, password reset and e-mail verification share one budget. Logging in with MFA takes two requests.
+- `rate_limit_oauth` (default `60/1m`): the OAuth endpoints used by the web app and connected apps. An open tab refreshes its token every ten minutes.
+- `rate_limit_register` (default `10/1h`): registration of new connected apps (MCP clients register once, when you connect them).
+
+Write a limit as `<requests>/<duration>` (durations like `30s`, `15m`, `1h`), or `off` to turn it off. The counters live in memory and start over on a restart. Behind a reverse proxy, set [`trustedproxies`](#behind-a-reverse-proxy) first, or all your visitors share one budget.
 
 ---
 

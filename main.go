@@ -108,6 +108,10 @@ func run(serve func(router *gin.Engine, address string) error) error {
 	if err := config.ValidateMaxImagePixels(config.ConfigFile.MaxImagePixels); err != nil {
 		logger.Log.Warn("ignoring max_image_pixels, using the default: " + err.Error())
 	}
+	if err := config.ValidateRateLimits(config.ConfigFile); err != nil {
+		logger.Log.Error("invalid rate limit. error: " + err.Error())
+		os.Exit(1)
+	}
 	if strings.TrimSpace(config.ConfigFile.PoenskelistenExternalURL) == "" {
 		logger.Log.Warn("externalurl is not set, so " + config.OAuthIssuer() + " is used for links, single sign-on and as the main login address. Set externalurl to the address users open Pønskelisten on, and additionalurls for any others.")
 	}
@@ -191,12 +195,14 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 		"/api/auth/users/update":    middlewares.ImageUploadMaxBodyBytes,
 	}))
 
-	// Per-IP limits on the endpoints that check a secret. A household behind one
-	// NAT shares a budget, so they're sized for typos, not for a single user.
-	// The MFA routes share one limiter: they all check a TOTP or recovery code,
-	// and separate budgets would multiply the guesses an attacker gets.
-	passwordLoginLimit := middlewares.RateLimitAPI(20, 15*time.Minute)
-	mfaCodeLimit := middlewares.RateLimitAPI(10, 15*time.Minute)
+	// Every endpoint that checks a password or a one-time code (or e-mails
+	// one) shares one budget per client address, so guessing can't move from
+	// one to the next. The OAuth endpoints share another.
+	loginRateLimit := config.LoginRateLimit(configFile)
+	loginLimit := middlewares.APIRateLimit(loginRateLimit.Max, loginRateLimit.Window)
+	oauthRateLimit := config.OAuthRateLimit(configFile)
+	oauthLimit := middlewares.RateLimit(oauthRateLimit.Max, oauthRateLimit.Window)
+	registerRateLimit := config.RegisterRateLimit(configFile)
 
 	// API endpoint
 	api := router.Group("/api")
@@ -206,21 +212,21 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			// Password-based entry points; all refused when local login is
 			// disabled (OIDC-only), see middlewares.RequireLocalLogin.
 			localLogin := middlewares.RequireLocalLogin()
-			open.POST("/tokens/register", passwordLoginLimit, localLogin, controllers.GenerateToken)
+			open.POST("/tokens/register", loginLimit, localLogin, controllers.GenerateToken)
 
-			open.POST("/users", localLogin, controllers.RegisterUser)
-			open.POST("/users/reset", localLogin, controllers.APIResetPassword)
-			open.GET("/users/reset/:resetCode", localLogin, controllers.APIVerifyResetCode)
-			open.POST("/users/password", localLogin, controllers.APIChangePassword)
-			open.POST("/users/verify/:code", controllers.VerifyUser)
-			open.POST("/users/verification", controllers.SendUserVerificationCode)
+			open.POST("/users", loginLimit, localLogin, controllers.RegisterUser)
+			open.POST("/users/reset", loginLimit, localLogin, controllers.APIResetPassword)
+			open.GET("/users/reset/:resetCode", loginLimit, localLogin, controllers.APIVerifyResetCode)
+			open.POST("/users/password", loginLimit, localLogin, controllers.APIChangePassword)
+			open.POST("/users/verify/:code", loginLimit, controllers.VerifyUser)
+			open.POST("/users/verification", loginLimit, controllers.SendUserVerificationCode)
 
 			// MFA enrollment is reachable during the login gate (SSO-authed), so it
 			// lives under /open: a user forced to enroll has no access token yet.
-			open.POST("/users/mfa/enroll", controllers.APIEnrollMFA)
-			open.POST("/users/mfa/activate", mfaCodeLimit, controllers.APIActivateMFA)
+			open.POST("/users/mfa/enroll", loginLimit, controllers.APIEnrollMFA)
+			open.POST("/users/mfa/activate", loginLimit, controllers.APIActivateMFA)
 
-			open.POST("/tokens/mfa", mfaCodeLimit, localLogin, controllers.APIValidateMFA)
+			open.POST("/tokens/mfa", loginLimit, localLogin, controllers.APIValidateMFA)
 
 			open.GET("/oidc/config", controllers.APIGetOIDCConfig)
 			open.GET("/oidc/login", controllers.OIDCLogin)
@@ -281,9 +287,10 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			auth.GET("/users/:user_id", controllers.GetUser)
 			auth.GET("/users/:user_id/image", controllers.APIGetUserProfileImage)
 			auth.GET("/users", controllers.GetUsers)
-			auth.POST("/users/update", controllers.UpdateUser)
+			// These two check the current password.
+			auth.POST("/users/update", loginLimit, controllers.UpdateUser)
 
-			auth.POST("/users/mfa/disable", mfaCodeLimit, controllers.APIDisableMFA)
+			auth.POST("/users/mfa/disable", loginLimit, controllers.APIDisableMFA)
 		}
 
 		admin := api.Group("/admin").Use(middlewares.Auth(true))
@@ -384,15 +391,13 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	router.GET("/.well-known/oauth-protected-resource", controllers.APIOAuthProtectedResourceMetadata)
 	router.GET("/.well-known/jwks.json", controllers.APIOAuthJWKS)
 
-	// OAuth 2.1 authorization server endpoints (also outside /api). The web
-	// client hits /oauth/token on every page load to roll its access token, so
-	// its limit is generous; it is there to cap abuse, not to slow guessing.
-	router.GET("/oauth/authorize", middlewares.RateLimit(60, time.Minute), controllers.APIOAuthAuthorize)
-	router.POST("/oauth/consent", controllers.APIOAuthConsent)
-	router.POST("/oauth/token", middlewares.RateLimit(120, time.Minute), controllers.APIOAuthToken)
-	router.POST("/oauth/revoke", controllers.APIOAuthRevoke)
+	// OAuth 2.1 authorization server endpoints (also outside /api).
+	router.GET("/oauth/authorize", oauthLimit, controllers.APIOAuthAuthorize)
+	router.POST("/oauth/consent", oauthLimit, controllers.APIOAuthConsent)
+	router.POST("/oauth/token", oauthLimit, controllers.APIOAuthToken)
+	router.POST("/oauth/revoke", oauthLimit, controllers.APIOAuthRevoke)
 	// Open dynamic client registration (RFC 7591), rate-limited per IP.
-	router.POST("/oauth/register", middlewares.RateLimit(10, time.Hour), controllers.APIOAuthRegister)
+	router.POST("/oauth/register", middlewares.RateLimit(registerRateLimit.Max, registerRateLimit.Window), controllers.APIOAuthRegister)
 
 	// MCP resource server (self-gates on MCPEnabled; OAuth-protected).
 	router.Any("/mcp", mcpserver.Handler())
@@ -525,6 +530,11 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 	// auto-derive from the external URL and can be hand-edited in config.json if a
 	// deployment ever needs to override them.
 	var mcpEnabled = flag.String("mcpenabled", strconv.FormatBool(configFile.MCPEnabled), "If the MCP resource server is enabled.")
+
+	// Rate limits, written as "<requests>/<duration>" (e.g. 20/15m), or "off".
+	var rateLimitLogin = flag.String("ratelimitlogin", configFile.RateLimitLogin, "Requests per client address to login, MFA, registration, password reset and e-mail verification, e.g. 20/15m, or off. Default "+config.DefaultLoginRateLimit+".")
+	var rateLimitOAuth = flag.String("ratelimitoauth", configFile.RateLimitOAuth, "Requests per client address to the OAuth authorize, consent, token and revoke endpoints, e.g. 60/1m, or off. Default "+config.DefaultOAuthRateLimit+".")
+	var rateLimitRegister = flag.String("ratelimitregister", configFile.RateLimitRegister, "OAuth client registrations per client address, e.g. 10/1h, or off. Default "+config.DefaultRegisterRateLimit+".")
 
 	// Generate invite
 	var generateInvite = flag.String("generateinvite", "false", "If an invite code should be automatically generate on startup.")
@@ -734,6 +744,30 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 
 	if provided["mcpenabled"] {
 		configFile.MCPEnabled = strings.ToLower(*mcpEnabled) == "true"
+	}
+
+	// Validated here so a typo stops startup rather than silently falling back
+	// to the default (or to no limit).
+	rateLimitFlags := []struct {
+		name   string
+		value  *string
+		target *string
+	}{
+		{"ratelimitlogin", rateLimitLogin, &configFile.RateLimitLogin},
+		{"ratelimitoauth", rateLimitOAuth, &configFile.RateLimitOAuth},
+		{"ratelimitregister", rateLimitRegister, &configFile.RateLimitRegister},
+	}
+	for _, rateLimitFlag := range rateLimitFlags {
+		if !provided[rateLimitFlag.name] {
+			continue
+		}
+		value := strings.TrimSpace(*rateLimitFlag.value)
+		if value != "" {
+			if _, err := config.ParseRateLimit(value); err != nil {
+				return configFile, actions, flagsProvided, errors.New("invalid -" + rateLimitFlag.name + " value: " + err.Error())
+			}
+		}
+		*rateLimitFlag.target = value
 	}
 
 	// Runtime-only actions, never persisted to config.

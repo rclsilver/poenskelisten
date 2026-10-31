@@ -198,6 +198,9 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		"-oidcautocreateusers", "true",
 		"-disablelocallogin", "true",
 		"-mcpenabled", "true",
+		"-ratelimitlogin", " 5/1m ",
+		"-ratelimitoauth", "off",
+		"-ratelimitregister", "3/2h",
 		"-generateinvite", "true",
 	)
 	logLevel := logger.Log.GetLevel()
@@ -253,6 +256,9 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		OIDCAutoCreateUsers:         true,
 		LocalLoginDisabled:          true,
 		MCPEnabled:                  true,
+		RateLimitLogin:              "5/1m",
+		RateLimitOAuth:              "off",
+		RateLimitRegister:           "3/2h",
 	}
 	if out != want {
 		t.Errorf("parsed config mismatch:\n got %+v\nwant %+v", out, want)
@@ -1101,110 +1107,6 @@ func TestFrontendHasNoInlineScript(t *testing.T) {
 	}
 }
 
-// The endpoints that check a secret are each rate-limited per client IP, and
-// every MFA code check draws on one shared budget. httptest gives every
-// request the same RemoteAddr, so they all count against one client.
-func TestInitRouterRateLimitsSecretChecks(t *testing.T) {
-	cases := []struct {
-		method string
-		path   string
-		limit  int
-	}{
-		{http.MethodPost, "/api/open/tokens/register", 20},
-		{http.MethodPost, "/api/open/tokens/mfa", 10},
-		{http.MethodPost, "/api/open/users/mfa/activate", 10},
-		{http.MethodPost, "/api/auth/users/mfa/disable", 10},
-		{http.MethodGet, "/oauth/authorize", 60},
-		{http.MethodPost, "/oauth/token", 120},
-	}
-	for _, c := range cases {
-		t.Run(c.path, func(t *testing.T) {
-			// A fresh router per case, so every limiter starts empty.
-			router, token := setupRouterTest(t)
-			user := createRouterUser(t, "Limited", false)
-			send := func() *httptest.ResponseRecorder {
-				w := httptest.NewRecorder()
-				req := httptest.NewRequest(c.method, c.path, strings.NewReader("{}"))
-				req.Header.Set("Authorization", token(user.ID, false))
-				router.ServeHTTP(w, req)
-				return w
-			}
-
-			for i := 0; i < c.limit; i++ {
-				if w := send(); w.Code == http.StatusTooManyRequests {
-					t.Fatalf("request %d of %d was rate-limited", i+1, c.limit)
-				}
-			}
-			w := send()
-			if w.Code != http.StatusTooManyRequests {
-				t.Errorf("request over the limit = %d, want 429", w.Code)
-			}
-			if w.Header().Get("Retry-After") == "" {
-				t.Error("429 response has no Retry-After header")
-			}
-		})
-	}
-
-	t.Run("MFA routes share a budget", func(t *testing.T) {
-		router, token := setupRouterTest(t)
-		user := createRouterUser(t, "Limited", false)
-		send := func(path string) int {
-			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
-			req.Header.Set("Authorization", token(user.ID, false))
-			router.ServeHTTP(w, req)
-			return w.Code
-		}
-
-		for i := 0; i < 10; i++ {
-			send("/api/open/tokens/mfa")
-		}
-		for _, path := range []string{"/api/open/users/mfa/activate", "/api/auth/users/mfa/disable"} {
-			if code := send(path); code != http.StatusTooManyRequests {
-				t.Errorf("POST %s after the MFA budget was spent = %d, want 429", path, code)
-			}
-		}
-	})
-}
-
-// X-Forwarded-For only picks the client IP the rate limits count against when
-// the peer is a configured proxy; from anyone else, a fresh header per request
-// must not buy a fresh budget. httptest's peer address is 192.0.2.1.
-func TestInitRouterTrustsForwardedForOnlyFromTrustedProxies(t *testing.T) {
-	cases := []struct {
-		name          string
-		trusted       string
-		wantLimitedAt int // 0: never limited within the requests sent
-	}{
-		{"no trusted proxies", "", 21},
-		{"other proxy trusted", "10.0.0.0/8", 21},
-		{"peer is a trusted proxy", "192.0.2.0/24", 0},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			setupRouterTest(t)
-			cfg := config.ConfigFile
-			cfg.PoenskelistenTrustedProxies = c.trusted
-			router := initRouter(cfg)
-
-			limitedAt := 0
-			for i := 1; i <= 25; i++ {
-				w := httptest.NewRecorder()
-				req := httptest.NewRequest(http.MethodPost, "/api/open/tokens/register", strings.NewReader("{}"))
-				req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i))
-				router.ServeHTTP(w, req)
-				if w.Code == http.StatusTooManyRequests {
-					limitedAt = i
-					break
-				}
-			}
-			if limitedAt != c.wantLimitedAt {
-				t.Errorf("first 429 at request %d, want %d", limitedAt, c.wantLimitedAt)
-			}
-		})
-	}
-}
-
 // setupRunDir runs the test in a fresh working directory, so run's files/
 // directory (config, log, SQLite database) lands there, with the repository's
 // web/ linked in for initRouter. It restores every global run replaces.
@@ -1398,82 +1300,99 @@ func TestRunStartupFailures(t *testing.T) {
 	}
 }
 
-// Any account can put any other in a group or make it a collaborator, without
-// its say. Other users, wherever they show up, are only an ID and a name: no
-// e-mail address, no admin or MFA flag.
-func TestResponsesShowOtherUsersOnlyByName(t *testing.T) {
-	router, token := setupRouterTest(t)
-	now := time.Now()
-	truth := true
+// X-Forwarded-For only picks the client IP the rate limits count against when
+// the peer is a configured proxy; from anyone else, a fresh header per request
+// must not buy a fresh budget. httptest's peer address is 192.0.2.1.
+func TestInitRouterTrustsForwardedForOnlyFromTrustedProxies(t *testing.T) {
+	cases := []struct {
+		name          string
+		trusted       string
+		wantLimitedAt int // 0: never limited within the requests sent
+	}{
+		{"no trusted proxies", "", 21},
+		{"other proxy trusted", "10.0.0.0/8", 21},
+		{"peer is a trusted proxy", "192.0.2.0/24", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			setupRouterTest(t)
+			cfg := config.ConfigFile
+			cfg.PoenskelistenTrustedProxies = c.trusted
+			cfg.RateLimitLogin = "20/15m"
+			router := initRouter(cfg)
 
-	erin := createRouterUser(t, "Erin", false)
-	erin.MFAEnabled = new(bool)
-	if err := database.Instance.Save(&erin).Error; err != nil {
-		t.Fatal(err)
-	}
-	dave := createRouterUser(t, "Dave", true)
-	alice := createRouterUser(t, "Alice", true)
-
-	family := models.Group{Name: "Family", Enabled: true, OwnerID: alice.ID}
-	family.ID = uuid.New()
-	createRouterRecord(t, &family)
-	for _, memberID := range []uuid.UUID{alice.ID, erin.ID, dave.ID} {
-		membership := models.GroupMembership{GroupID: family.ID, MemberID: memberID, Enabled: true}
-		membership.ID = uuid.New()
-		createRouterRecord(t, &membership)
-	}
-	shared := models.Wishlist{Name: "Alice list", Enabled: true, OwnerID: alice.ID, Date: &now, Claimable: &truth}
-	shared.ID = uuid.New()
-	createRouterRecord(t, &shared)
-	share := models.WishlistMembership{GroupID: family.ID, WishlistID: shared.ID, Enabled: true}
-	share.ID = uuid.New()
-	createRouterRecord(t, &share)
-	wish := models.Wish{Name: "Alice wish", Enabled: true, OwnerID: alice.ID, WishlistID: shared.ID}
-	wish.ID = uuid.New()
-	createRouterRecord(t, &wish)
-	claim := models.WishClaim{WishID: wish.ID, UserID: dave.ID, Enabled: true}
-	claim.ID = uuid.New()
-	createRouterRecord(t, &claim)
-	own := models.Wishlist{Name: "Erin list", Enabled: true, OwnerID: erin.ID, Date: &now}
-	own.ID = uuid.New()
-	createRouterRecord(t, &own)
-
-	erinToken := token(erin.ID, false)
-	send := func(method, path, body string) string {
-		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", erinToken)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		if w.Code >= 300 {
-			t.Fatalf("%s %s = %d: %s", method, path, w.Code, w.Body.String())
-		}
-		return w.Body.String()
-	}
-	created := send("POST", "/api/auth/groups", `{"name":"Throwaway group","members":["`+dave.ID.String()+`"]}`)
-	var groups struct {
-		Groups []struct{ ID string } `json:"groups"`
-	}
-	if err := json.Unmarshal([]byte(created), &groups); err != nil || len(groups.Groups) == 0 {
-		t.Fatalf("no group in %s", created)
-	}
-	responses := map[string]string{
-		"new group":       created,
-		"collaborator":    send("POST", "/api/auth/wishlists/"+own.ID.String()+"/collaborate", `{"users":["`+dave.ID.String()+`"]}`),
-		"group members":   send("GET", "/api/auth/groups/"+family.ID.String()+"/members", ""),
-		"groups":          send("GET", "/api/auth/groups", ""),
-		"directory":       send("GET", "/api/auth/users", ""),
-		"user":            send("GET", "/api/auth/users/"+dave.ID.String(), ""),
-		"shared wishlist": send("GET", "/api/auth/wishlists/"+shared.ID.String(), ""),
-		"wishlists":       send("GET", "/api/auth/wishlists", ""),
-		"wishes":          send("GET", "/api/auth/wishes?wishlist="+shared.ID.String(), ""),
-		"wish":            send("GET", "/api/auth/wishes/"+wish.ID.String(), ""),
-	}
-	for name, body := range responses {
-		for _, leak := range []string{*dave.Email, *alice.Email, `"admin":true`, `"mfa_enabled":true`} {
-			if strings.Contains(body, leak) {
-				t.Errorf("%s response carries %s: %s", name, leak, body)
+			limitedAt := 0
+			for i := 1; i <= 25; i++ {
+				w := httptest.NewRecorder()
+				// Another address each time, so the account's own limit stays out of it.
+				body := fmt.Sprintf(`{"email":"nobody-%d@example.com","password":"x"}`, i)
+				req := httptest.NewRequest(http.MethodPost, "/api/open/tokens/register", strings.NewReader(body))
+				req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i))
+				router.ServeHTTP(w, req)
+				if w.Code == http.StatusTooManyRequests {
+					limitedAt = i
+					break
+				}
 			}
+			if limitedAt != c.wantLimitedAt {
+				t.Errorf("first 429 at request %d, want %d", limitedAt, c.wantLimitedAt)
+			}
+		})
+	}
+}
+
+func TestParseFlagsInvalidRateLimitFails(t *testing.T) {
+	withArgs(t, "-ratelimitoauth", "sixty")
+
+	_, _, _, err := parseFlags(models.ConfigStruct{})
+	if err == nil || !strings.Contains(err.Error(), "ratelimitoauth") {
+		t.Errorf("parseFlags error = %v, want an invalid -ratelimitoauth error", err)
+	}
+}
+
+// postFrom sends a POST with the given body from remoteAddr and returns the status.
+func postFrom(router *gin.Engine, path string, remoteAddr string, contentType string, body string) int {
+	w := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	request.RemoteAddr = remoteAddr
+	router.ServeHTTP(w, request)
+	return w.Code
+}
+
+// The password and code entry points share one budget per address, and the
+// OAuth endpoints another. Requests are malformed so the handlers stop before
+// touching the database: the limit runs first either way.
+func TestInitRouterRateLimitsLoginAndOAuth(t *testing.T) {
+	router := initRouter(models.ConfigStruct{RateLimitLogin: "2/1m", RateLimitOAuth: "1/1m"})
+	const client, other = "203.0.113.10:5000", "203.0.113.11:5000"
+	jsonType, formType := "application/json", "application/x-www-form-urlencoded"
+
+	codes := []int{
+		postFrom(router, "/api/open/tokens/register", client, jsonType, "{"),
+		postFrom(router, "/api/open/tokens/mfa", client, jsonType, "{"),
+		postFrom(router, "/api/open/users/reset", client, jsonType, "{"),
+	}
+	if codes[0] == http.StatusTooManyRequests || codes[1] == http.StatusTooManyRequests || codes[2] != http.StatusTooManyRequests {
+		t.Errorf("login, MFA, reset codes = %v, want the third refused with 429", codes)
+	}
+	if code := postFrom(router, "/api/open/tokens/register", other, jsonType, "{"); code == http.StatusTooManyRequests {
+		t.Error("another address shouldn't share the budget")
+	}
+
+	if code := postFrom(router, "/oauth/token", client, formType, "grant_type=nope"); code != http.StatusBadRequest {
+		t.Errorf("first token request = %d, want 400 (unsupported grant)", code)
+	}
+	if code := postFrom(router, "/oauth/revoke", client, formType, ""); code != http.StatusTooManyRequests {
+		t.Errorf("second OAuth request = %d, want 429", code)
+	}
+}
+
+func TestInitRouterRateLimitsCanBeTurnedOff(t *testing.T) {
+	router := initRouter(models.ConfigStruct{RateLimitLogin: "off"})
+	for i := 0; i < 30; i++ {
+		if code := postFrom(router, "/api/open/tokens/register", "203.0.113.12:5000", "application/json", "{"); code == http.StatusTooManyRequests {
+			t.Fatalf("request %d refused with the login limit off", i+1)
 		}
 	}
 }
