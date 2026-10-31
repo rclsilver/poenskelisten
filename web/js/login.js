@@ -1,12 +1,8 @@
-// Sign-in page: password login, the MFA step (/login/mfa), single sign-on,
-// the forgotten-password request and the password reset reached from the
-// e-mailed link (?reset_code=).
 (function () {
     "use strict";
     var h = P.h;
 
-    // After a successful login, return to the OAuth flow (the `next` URL set by
-    // /oauth/authorize) or the home page. Only same-site paths are followed.
+    // Only same-site paths are followed: next comes from the URL.
     function redirectAfterLogin() {
         var next = new URL(window.location.href).searchParams.get("next");
         window.location.href = P.safeLocalPath(next || "/");
@@ -91,7 +87,6 @@
                 h("a", { href: "/register", text: P.t("login.noAccount") }))
         ]);
 
-        // Offer single sign-on next to the password form when configured.
         P.api("GET", "open/oidc/config").then(function (config) {
             if (config.enabled && config.login_url) {
                 P.mount(oidc,
@@ -100,7 +95,6 @@
                 oidc.hidden = false;
             }
         }, function () {
-            // No SSO offered: the password form is enough.
         });
         email.focus();
     }
@@ -170,7 +164,6 @@
                 try {
                     sessionStorage.removeItem("mfa_token");
                 } catch (e) {
-                    // Nothing left to clean up.
                 }
                 button.disabled = true;
                 redirectAfterLogin();
@@ -187,7 +180,6 @@
                 try {
                     sessionStorage.removeItem("mfa_token");
                 } catch (e) {
-                    // Nothing to clean up.
                 }
             } } }))
         ], "lamp");

@@ -1,7 +1,5 @@
-// A public wishlist (/wishlists/public/:hash), readable without an account.
-// Visitors see which wishes are taken but not by whom. A signed-in visitor
-// who can open the list in the app is sent there to claim; its owner and
-// collaborators see no claim at all, as in the app.
+// Visitors see that a wish is taken, not by whom. The owner and collaborators
+// see no claim, as in the app.
 (function () {
     "use strict";
     var h = P.h;
@@ -52,7 +50,6 @@
                             h("span", { text: P.t("public.haveAccess") }),
                             h("a", { class: "btn small primary", href: "/wishlists/" + encodeURIComponent(wishlist.id), text: P.t("public.openInApp") })));
                     }, function () {
-                        // No access beyond the public link: nothing to offer.
                     });
                 } else if (wishlist.claimable) {
                     P.mount(banner, h("p", { class: "notice", text: P.t("public.signInHint") }));

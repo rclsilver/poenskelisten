@@ -1,6 +1,3 @@
-// Cards shared by several pages: a wishlist with a cover made of its wish
-// pictures, and a wish with its picture, price, note, claim status and the
-// actions the viewer is allowed.
 (function () {
     "use strict";
     var h = P.h;
@@ -15,7 +12,6 @@
         return P.t("role.member", { name: P.displayName(wishlist.owner) });
     }
 
-    // expiryText describes when a list stops accepting claims, or nothing.
     P.expiryText = function (wishlist) {
         if (!wishlist.expires || !wishlist.date) {
             return "";
@@ -92,13 +88,8 @@
         return box;
     }
 
-    // wishCard renders a wish. ctx.mode:
-    //   "manage"  owner or collaborator: edit and delete, no claim status;
-    //   "member"  group member: claim, unclaim, who claimed it;
-    //   "public"  public link: claim status only, sign in to claim;
-    //   "preview" the live preview of the wish form.
-    // Other ctx fields: userID, hideClaimers, showClaims, previewImage,
-    // onClaim, onUnclaim, onDelete.
+    // ctx.mode: "manage" (owner, collaborators), "member" (group member, may claim),
+    // "public" (public link) or "preview" (the wish form).
     P.wishCard = function (wish, ctx) {
         var claim = P.claimState(wish, ctx.userID);
         var claimable = !!wish.wish_claimable;
@@ -156,10 +147,6 @@
         return text.indexOf(query) !== -1;
     }
 
-    // wishBoard renders the wishes of a list with a search box, an "available
-    // only" filter for claimers, the sort and the layout (grouped by category,
-    // collapsible, or flat). Sort and layout are remembered as preferences.
-    // It returns {el, update(wishes)}.
     P.wishBoard = function (ctx) {
         var prefs = P.loadSortPrefs();
         var wishes = [];

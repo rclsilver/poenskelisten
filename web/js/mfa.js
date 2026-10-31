@@ -1,7 +1,5 @@
-// Two-factor enrolment shared by the account page and the forced-enrolment
-// page (/enroll): QR code and manual key, confirmation code, then the
-// recovery codes, shown once. Both use the /open MFA endpoints, which accept
-// the SSO session as well as the access token.
+// Shared by the account page and /enroll. The /open MFA endpoints accept the
+// SSO session as well as the access token.
 (function () {
     "use strict";
     var h = P.h;
@@ -16,9 +14,6 @@
                 P.button(P.t("mfa.codesSaved"), onDone, "primary", "check")));
     }
 
-    // P.mfaEnrol fills container with the enrolment steps. onDone runs once
-    // MFA is on and any recovery codes were acknowledged; onCancel, when
-    // given, adds a cancel button.
     P.mfaEnrol = function (container, onDone, onCancel) {
         P.mount(container, P.loading());
         P.api("POST", "open/users/mfa/enroll").then(function (result) {

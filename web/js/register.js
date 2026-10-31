@@ -1,5 +1,3 @@
-// Registration: name, e-mail, password twice, an invite code and consent.
-// On an OIDC-only server accounts come from the identity provider instead.
 (function () {
     "use strict";
     var h = P.h;

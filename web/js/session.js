@@ -1,9 +1,6 @@
-// Session handling for every signed-in page: the access token cookie, the
-// OAuth 2.1 authorization-code + PKCE flow against the app's own
-// authorization server, token refresh and sign-out. Pages call
-// startSession(required) through P.page (core.js).
+// The access token cookie, the OAuth 2.1 + PKCE flow against the app's own
+// authorization server, token refresh and sign-out.
 
-// Register the service worker (offline page, notifications).
 if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/service-worker.js").catch(function () {
         // Without it the app still works, just not offline.
@@ -165,8 +162,6 @@ function startAuthorizeFlow() {
 }
 
 
-// postTokenRequest posts a form to /oauth/token and resolves with the access
-// token, or null.
 function postTokenRequest(body) {
     return fetch(oauth_base + "token", {
         method: "POST",
@@ -231,7 +226,6 @@ function handleOAuthCallback() {
 }
 
 // Roll the access token using the refresh cookie via the OAuth token endpoint.
-// Resolves with true when a new token is in place.
 function refreshAccessToken() {
     var body = new URLSearchParams({ grant_type: "refresh_token", client_id: OAUTH_CLIENT_ID });
     return postTokenRequest(body).then(function(accessToken) {
@@ -264,9 +258,8 @@ P.onUnauthorized = function() {
     });
 };
 
-// startSession resolves with the current user (the data of /api/auth/me), after
-// a token refresh if needed. When required and there is no session, it starts
-// the sign-in flow and never resolves; otherwise it resolves with null.
+// When required and there is no session, startSession starts the sign-in
+// flow and never resolves; otherwise it resolves with null.
 function startSession(required) {
     var check = function(triedRefresh) {
         var token = get_cookie("poenskelisten");

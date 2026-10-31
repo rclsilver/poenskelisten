@@ -1,10 +1,4 @@
-// The wish form, on one page with a live preview, for /wishes/new and
-// /wishes/:id/edit.
-//
-// Where a new wish goes (P.wishDestination): from a list (?wishlist=) that
-// list, with "Change list" when there are others; from the home page the user
-// must pick one unless only one list can take wishes. Only active lists the
-// user owns or collaborates on are offered. An edited wish stays on its list.
+// An edited wish stays on its list; a new one goes where P.wishDestination says.
 (function () {
     "use strict";
     var h = P.h;
@@ -43,7 +37,6 @@
             return;
         }
 
-        // ---- destination
         var listSelect = h("select", { name: "wishlist", required: true },
             h("option", { value: "", text: P.t("wishForm.chooseList") }),
             eligible.map(function (l) { return h("option", { value: l.id, text: l.name, selected: l.id === destination.listID }); }));
@@ -65,7 +58,6 @@
             return destinationBox.contains(listSelect) ? listSelect.value : destination.listID;
         };
 
-        // ---- fields
         var name = h("input", { type: "text", name: "name", required: true, value: editing ? wish.name : "", attrs: { maxlength: 200, autocomplete: "off" } });
         var price = h("input", { type: "number", name: "price", value: editing && wish.price ? String(wish.price) : "", attrs: { min: 0, step: "0.01", inputmode: "decimal" } });
         var url = h("input", { type: "text", name: "url", value: editing ? wish.url || "" : "", placeholder: "https://", attrs: { inputmode: "url", autocomplete: "off", spellcheck: "false" } });
@@ -101,7 +93,6 @@
             });
         };
 
-        // ---- image: keep, replace, delete (edit) or none/replace (new)
         var hadImage = editing && !!wish.image;
         var currentImage = null;
         var image = { action: hadImage ? "keep" : "none", data: "" };
@@ -147,7 +138,6 @@
             });
         }
 
-        // ---- live preview
         var previewBox = h("div");
         var preview = function () {
             var amount = price.value === "" ? null : Number(price.value);
@@ -173,7 +163,6 @@
         });
         listSelect.addEventListener("change", loadCategories);
 
-        // ---- submit
         var save = h("button", { type: "submit", class: "btn primary", text: editing ? P.t("action.save") : P.t("wish.add") });
         var form = h("form", { class: "panel form-grid", on: { submit: function (event) {
             event.preventDefault();

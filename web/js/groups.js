@@ -1,5 +1,3 @@
-// Groups page: the groups the user belongs to, and creating one with its
-// members and the user's lists in a single form.
 (function () {
     "use strict";
     var h = P.h;
@@ -19,7 +17,6 @@
             h("a", { class: "btn", href: href, text: P.t("group.open") }));
     }
 
-    // createDialog asks for everything a new group needs on one form.
     function createDialog(user) {
         var name = h("input", { type: "text", name: "name", required: true, attrs: { maxlength: 200, autocomplete: "off" } });
         var description = h("textarea", { name: "description" });

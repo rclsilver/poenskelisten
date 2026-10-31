@@ -1,9 +1,5 @@
-// Account page: profile (e-mail, picture, password, all confirmed with the
-// current password), two-factor authentication, display preferences,
-// sessions and connected apps. First and last names can't be changed.
-// Accounts that sign in through OIDC manage e-mail, password and MFA at their
-// provider; local accounts on an OIDC-only server keep only their picture and
-// e-mail.
+// First and last names can't be changed. OIDC accounts manage e-mail, password
+// and MFA at their provider.
 (function () {
     "use strict";
     var h = P.h;

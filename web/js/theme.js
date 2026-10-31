@@ -1,6 +1,5 @@
-// Applies the saved theme before the first paint. Loaded synchronously from
-// <head>, so it must stay tiny and must not touch the body. With no saved
-// choice nothing is set and the stylesheet follows the system theme.
+// Loaded synchronously from <head> so the saved theme applies before the
+// first paint.
 (function () {
     "use strict";
     try {

@@ -1,7 +1,4 @@
-// The wishlist form, on one page, for /wishlists/new (?group= preselects a
-// group) and /wishlists/:id/edit. Owners also manage sharing here: the
-// groups the list is shared with and its collaborators. Changes to those are
-// collected and sent when the form is saved.
+// Sharing changes (groups, collaborators) are collected and sent on save.
 (function () {
     "use strict";
     var h = P.h;
@@ -17,7 +14,6 @@
         return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
     }
 
-    // sequence runs promise-returning steps one after the other.
     function sequence(steps) {
         return steps.reduce(function (chain, step) { return chain.then(step); }, Promise.resolve());
     }
@@ -50,8 +46,7 @@
         claimable.input.addEventListener("change", syncOptions);
         syncOptions();
 
-        // Groups: the user's groups, plus any group the list is already
-        // shared with (the owner may have left it since).
+        // The owner may have left a group the list is still shared with.
         var linked = editing ? (wishlist.members || []).map(function (group) { return group.id; }) : (preselectedGroup ? [preselectedGroup] : []);
         var groupOptions = groups.slice();
         (editing ? wishlist.members || [] : []).forEach(function (group) {
@@ -64,7 +59,6 @@
             return box;
         });
 
-        // Collaborators: current ones can be removed, others added.
         var collaborators = editing ? (wishlist.collaborators || []).filter(function (c) { return c.enabled !== false; }).map(function (c) { return c.user; }) : [];
         var pending = collaborators.slice();
         // The API leaves current collaborators out of the candidates; keep them

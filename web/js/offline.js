@@ -1,5 +1,4 @@
-// The page the service worker shows when a page can't be reached offline. It
-// needs nothing from the API: everything it uses is precached.
+// Everything this page uses is precached by the service worker.
 (function () {
     "use strict";
     var h = P.h;

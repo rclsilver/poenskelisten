@@ -1,5 +1,3 @@
-// The /oauth/callback page: exchange the authorization code for tokens (via
-// handleOAuthCallback in session.js), then return to where the user started.
 (function () {
     "use strict";
 

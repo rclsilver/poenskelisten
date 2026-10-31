@@ -1,5 +1,3 @@
-// Lists page: the lists the user owns or collaborates on, then the ones
-// shared with them through groups. Expired lists hide behind a toggle.
 (function () {
     "use strict";
     var h = P.h;

@@ -1,6 +1,5 @@
-// Forced MFA enrolment (/enroll). Reached when the administrator enforces MFA
-// and the signed-in (SSO) user hasn't enrolled yet, before they hold an
-// access token; mfa.js talks to the SSO-authed /open MFA endpoints.
+// Reached before the user holds an access token: mfa.js uses the SSO-authed
+// /open MFA endpoints.
 (function () {
     "use strict";
     var h = P.h;
