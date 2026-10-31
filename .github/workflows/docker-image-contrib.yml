@@ -1,0 +1,42 @@
+name: Docker Image for Contrib
+
+# Fork-only: publishes an image for every push to `contrib`, the branch this fork
+# deploys from. Upstream's beta only builds `main`, on a schedule. Kept in its own
+# file so syncing with upstream never conflicts. See docs/ci.md for docker-build.yml.
+on:
+  push:
+    branches: [contrib]
+  workflow_dispatch:
+
+concurrency:
+  group: contrib-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      short: ${{ steps.sha.outputs.short }}
+    steps:
+    - name: Short commit ID
+      id: sha
+      env:
+        SHA: ${{ github.sha }}
+      run: echo "short=${SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      ref: ${{ github.sha }}
+      version: beta-${{ needs.version.outputs.short }}
+      # `sha-<short sha>` is immutable and is what deployments pin; `contrib`
+      # follows the branch.
+      tags: |
+        type=sha
+        type=ref,event=branch
+    secrets: inherit
