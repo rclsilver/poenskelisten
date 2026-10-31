@@ -485,3 +485,5 @@ dialog::backdrop { background: var(--overlay); }
 /* ------------------------------------------------------ page sections */
 .collection-actions { padding: 0 20px 18px; display: flex; gap: 8px; flex-wrap: wrap; }
 .panel.spaced { margin-top: 40px; }
+.offline-art { border-radius: var(--r); width: 100%; aspect-ratio: 1.25; object-fit: cover; }
+@media (max-width: 640px) { .offline-art { display: none; } }

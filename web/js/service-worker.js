@@ -1,16 +1,27 @@
-console.log("Service-worker loaded.");
+// Service worker: shows the offline page when a page can't be loaded, and
+// displays push notifications. It never caches API answers or anything
+// personal: only the offline page and the static files it needs.
 
 // Incrementing OFFLINE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
-const OFFLINE_VERSION = 1;
+const OFFLINE_VERSION = 2;
 const CACHE_NAME = 'poenskelisten-cache-v' + OFFLINE_VERSION;
 // Page returned from the cache when a navigation fails while offline.
-const OFFLINE_URL = '/';
-// Customize this with a different URL if needed.
+const OFFLINE_URL = '/offline';
+// The offline page and what it loads.
 const urlsToCache = [
     OFFLINE_URL,
     '/manifest.json',
-    '/assets/favicons/favicon.ico'
+    '/css/app.css',
+    '/js/theme.js',
+    '/js/core.js',
+    '/js/session.js',
+    '/js/offline.js',
+    '/json/lang-en.json',
+    '/json/lang-fr.json',
+    '/assets/illustrations/book.svg',
+    '/assets/favicons/favicon.ico',
+    '/assets/favicons/favicon-32x32.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -22,6 +33,8 @@ self.addEventListener('install', (event) => {
             await cache.add(new Request(urlsToCache[i], {cache: 'reload'}));
         }
     })());
+    // Take over from an older worker without waiting for every tab to close.
+    self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -47,8 +60,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-    // We only want to call event.respondWith() if this is a navigation request
-    // for an HTML page.
+    const url = new URL(event.request.url);
+
+    // Pages: network first, the offline page when the network is down.
     if (event.request.mode === 'navigate') {
         event.respondWith((async () => {
             try {
@@ -65,20 +79,30 @@ self.addEventListener('fetch', (event) => {
                 // due to a network error.
                 // If fetch() returns a valid HTTP response with a response code in
                 // the 4xx or 5xx range, the catch() will NOT be called.
-                console.log('Fetch failed; returning offline page instead.', error);
-
                 const cache = await caches.open(CACHE_NAME);
                 const cachedResponse = await cache.match(OFFLINE_URL);
                 return cachedResponse;
             }
           })());
+        return;
     }
 
-    // If our if() condition is false, then this fetch handler won't intercept the
-    // request. If there are any other fetch handlers registered, they will get a
-    // chance to call event.respondWith(). If no fetch handlers call
-    // event.respondWith(), the request will be handled by the browser as if there
-    // were no service worker involvement.
+    // The offline page's own files: network first so they stay current,
+    // the cached copy when offline. Nothing else is ever served from cache.
+    if (event.request.method === 'GET' && url.origin === self.location.origin && urlsToCache.includes(url.pathname)) {
+        event.respondWith((async () => {
+            try {
+                return await fetch(event.request);
+            } catch (error) {
+                const cache = await caches.open(CACHE_NAME);
+                const cachedResponse = await cache.match(url.pathname);
+                if (cachedResponse) {
+                    return cachedResponse;
+                }
+                throw error;
+            }
+        })());
+    }
 });
 
 self.addEventListener('notificationclose', event => {
@@ -98,7 +122,7 @@ self.addEventListener('notificationclose', event => {
 self.addEventListener('notificationclick', event => {
 
     try {
-        
+
         const notification = event.notification;
         const primaryKey = notification.data.primaryKey;
         const url = notification.data.url;
@@ -112,7 +136,7 @@ self.addEventListener('notificationclick', event => {
         }
 
         console.log('Clicked notification: ' + primaryKey);
-    
+
     } catch(e) {
         console.log("Failed to click notfication. Error: " + e)
     }
@@ -120,33 +144,6 @@ self.addEventListener('notificationclick', event => {
     // TODO 5.3 - close all notifications when one is clicked
 
 });
-
-
-/* This works
-self.addEventListener("push", (event) => {
-    if (!(self.Notification && self.Notification.permission === "granted")) {
-      return;
-    }
-  
-    const data = event.data?.json() ?? {};
-    const title = data.title || "Something Has Happened";
-    const message =
-      data.body || "Here's something you might want to check out.";
-    const icon = "images/new-notification.png";
-  
-    const notification = new self.Notification(title, {
-      body: message,
-      tag: "simple-push-demo-notification",
-      icon,
-    });
-  
-    notification.addEventListener("click", () => {
-      clients.openWindow(
-        "https://example.blog.com/2015/03/04/something-new.html",
-      );
-    });
-});
-*/
 
 self.addEventListener('push', function(event) {
 
@@ -165,8 +162,6 @@ self.addEventListener('push', function(event) {
             body: "An error occured"
         };
 
-        console.log("JSON: " + JSON.stringify(jsonData));
-
         let url;
         let action;
 
@@ -174,7 +169,7 @@ self.addEventListener('push', function(event) {
             url = "/achievements"
             action = "Check out"
         } else if(jsonData.category == "news") {
-            url = "/news"
+            url = "/"
             action = "Read"
         } else {
             url = "/"

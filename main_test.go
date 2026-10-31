@@ -933,7 +933,7 @@ func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 	name := `Ma "liste" <b>&</b>`
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
 	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback",
-		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account", "/admin", "/"} {
+		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account", "/admin", "/", "/offline"} {
 		w := serve(router, http.MethodGet, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s = %d, want 200", path, w.Code)
@@ -950,6 +950,33 @@ func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 		}
 		if !strings.Contains(body, `<script defer src="/js/core.js"></script>`) {
 			t.Errorf("GET %s doesn't load the shared scripts", path)
+		}
+	}
+}
+
+// The service worker fails to install if one of the files it precaches is
+// missing, and then there is no offline page at all.
+func TestServiceWorkerPrecachesServedFiles(t *testing.T) {
+	raw, err := os.ReadFile("web/js/service-worker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := regexp.MustCompile(`(?s)const urlsToCache = \[(.*?)\];`).FindSubmatch(raw)
+	if list == nil {
+		t.Fatal("urlsToCache not found in service-worker.js")
+	}
+	paths := regexp.MustCompile(`'([^']+)'|OFFLINE_URL`).FindAllSubmatch(list[1], -1)
+	if len(paths) < 2 {
+		t.Fatalf("found %d precached paths, want the offline page and its files", len(paths))
+	}
+	router := initRouter(models.ConfigStruct{})
+	for _, match := range paths {
+		path := string(match[1])
+		if path == "" {
+			path = "/offline"
+		}
+		if w := serve(router, http.MethodGet, path); w.Code != http.StatusOK {
+			t.Errorf("service worker precaches %s, which answers %d", path, w.Code)
 		}
 	}
 }
