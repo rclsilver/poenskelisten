@@ -746,16 +746,33 @@ func TestInitRouterEscapesAppText(t *testing.T) {
 	name := "A`${alert(1)}\\ & <b>\"'"
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name, PoenskelistenDescription: name})
 
-	w := serve(router, http.MethodGet, "/js/frontpage.js")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /js/frontpage.js = %d, want 200", w.Code)
-	}
+	// The scripts read the name from the page, but any JS template that
+	// places it in a template literal gets this escaping.
 	escaped := "A&#96;&#36;{alert(1)}&#92; &amp; &lt;b&gt;&#34;&#39;"
-	if !strings.Contains(w.Body.String(), escaped) {
-		t.Errorf("frontpage.js does not contain the escaped app name %q", escaped)
+	if got := withAppText(gin.H{"appName": name}, escapeForJSHTML)["appName"]; got != escaped {
+		t.Errorf("escaped JS app name = %q, want %q", got, escaped)
 	}
-	if strings.Contains(w.Body.String(), name) || strings.Contains(w.Body.String(), "${alert") {
-		t.Error("frontpage.js contains the raw app name")
+	scripts, err := filepath.Glob("web/js/*.js")
+	if err != nil || len(scripts) == 0 {
+		t.Fatalf("no scripts found (err %v)", err)
+	}
+	for _, script := range scripts {
+		path := "/js/" + filepath.Base(script)
+		if path == "/js/service-worker.js" {
+			path = "/service-worker.js"
+		}
+		w := serve(router, http.MethodGet, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", path, w.Code)
+		}
+		if strings.Contains(w.Body.String(), name) || strings.Contains(w.Body.String(), "${alert") {
+			t.Errorf("%s contains the raw app name", path)
+		}
+	}
+
+	w := serve(router, http.MethodGet, "/")
+	if strings.Contains(w.Body.String(), "<b>") || !strings.Contains(w.Body.String(), `content="A`) {
+		t.Errorf("/ doesn't carry the escaped app name; body: %s", w.Body.String())
 	}
 
 	w = serve(router, http.MethodGet, "/manifest.json")
@@ -1058,29 +1075,21 @@ func TestRoutesRefuseNilID(t *testing.T) {
 // in the frontend is silently refused by the browser: the button simply does
 // nothing. This keeps the markup in the shape the CSP needs (and that keeps
 // API data out of code): no inline handlers, inline <script> blocks or
-// javascript: URLs, and every action named in markup registered via
-// registerActions (web/js/actions.js).
+// javascript: URLs, in the pages, the layout or the code that builds elements.
 func TestFrontendHasNoInlineScript(t *testing.T) {
-	files, err := filepath.Glob("./web/html/*.html")
-	if err != nil {
-		t.Fatal(err)
+	var files []string
+	for _, pattern := range []string{"web/html/*.html", "web/templates/*.html", "web/js/*.js"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
 	}
-	jsFiles, err := filepath.Glob("./web/js/*.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	files = append(files, jsFiles...)
 
 	inlineHandler := regexp.MustCompile(`(?i)[\s"'](on[a-z]+)\s*=\s*["'\\]`)
 	inlineScript := regexp.MustCompile(`(?i)<script(\s[^>]*)?>`)
 	scriptURL := regexp.MustCompile(`(?i)(href|src|action|formaction)\s*=\s*["']\s*javascript:`)
-	actionAttr := regexp.MustCompile(`data-on-[a-z]+="([A-Za-z_$][\w$]*)"`)
-	actionHelper := regexp.MustCompile(`\bon(?:Click|Submit|Change)\(\s*['"]([A-Za-z_$][\w$]*)['"]`)
-	registration := regexp.MustCompile(`(?s)registerActions\(\{(.*?)\}\);`)
-	registeredName := regexp.MustCompile(`([A-Za-z_$][\w$]*)\s*[,:]`)
 
-	used := map[string]string{}
-	registered := map[string]bool{}
 	for _, file := range files {
 		content, err := os.ReadFile(file)
 		if err != nil {
@@ -1089,7 +1098,7 @@ func TestFrontendHasNoInlineScript(t *testing.T) {
 		src := string(content)
 
 		for _, m := range inlineHandler.FindAllStringSubmatch(src, -1) {
-			t.Errorf("%s: inline %s handler; use data-on-* / onClick() and registerActions instead", file, m[1])
+			t.Errorf("%s: inline %s handler; attach listeners with addEventListener instead", file, m[1])
 		}
 		for _, m := range scriptURL.FindAllString(src, -1) {
 			t.Errorf("%s: javascript: URL %q", file, m)
@@ -1100,30 +1109,6 @@ func TestFrontendHasNoInlineScript(t *testing.T) {
 					t.Errorf("%s: inline <script> block; move it to a web/js file", file)
 				}
 			}
-		}
-
-		if strings.HasSuffix(file, "actions.js") {
-			// its comment shows an example, not markup
-			continue
-		}
-		for _, re := range []*regexp.Regexp{actionAttr, actionHelper} {
-			for _, m := range re.FindAllStringSubmatch(src, -1) {
-				used[m[1]] = file
-			}
-		}
-		for _, block := range registration.FindAllStringSubmatch(src, -1) {
-			for _, m := range registeredName.FindAllStringSubmatch(block[1]+",", -1) {
-				registered[m[1]] = true
-			}
-		}
-	}
-
-	if len(used) == 0 {
-		t.Fatal("found no actions in markup; the scan patterns no longer match the frontend")
-	}
-	for name, file := range used {
-		if !registered[name] {
-			t.Errorf("%s: action %q is used in markup but never passed to registerActions", file, name)
 		}
 	}
 }
@@ -1551,7 +1536,7 @@ func TestFrontendPagesShowEscapedAppName(t *testing.T) {
 	name := `Ma "liste" <b>&</b>`
 	router := initRouter(models.ConfigStruct{PoenskelistenName: name})
 	for _, path := range []string{"/login", "/login/mfa", "/register", "/verify", "/enroll", "/oauth/callback",
-		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account", "/admin"} {
+		"/wishlists", "/wishlists/abc", "/wishlists/new", "/wishlists/abc/edit", "/wishlists/public/abc", "/wishes/new", "/wishes/abc/edit", "/groups", "/groups/abc", "/account", "/admin", "/"} {
 		w := serve(router, http.MethodGet, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s = %d, want 200", path, w.Code)
