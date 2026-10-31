@@ -327,7 +327,6 @@ func TestInitRouterServesTemplatedFrontend(t *testing.T) {
 		{"/enroll", "text/html"},
 		{"/account", "text/html"},
 		{"/js/login.js", "application/javascript"},
-		{"/js/functions.js", "application/javascript"},
 		{"/js/core.js", "application/javascript"},
 		{"/js/session.js", "application/javascript"},
 		{"/register", "text/html"},
@@ -338,7 +337,7 @@ func TestInitRouterServesTemplatedFrontend(t *testing.T) {
 		{"/service-worker.js", "application/javascript"},
 		{"/manifest.json", "application/json"},
 		{"/robots.txt", "text/plain"},
-		{"/css/main.css", "text/css"},
+		{"/offline", "text/html"},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
@@ -977,6 +976,84 @@ func TestServiceWorkerPrecachesServedFiles(t *testing.T) {
 		}
 		if w := serve(router, http.MethodGet, path); w.Code != http.StatusOK {
 			t.Errorf("service worker precaches %s, which answers %d", path, w.Code)
+		}
+	}
+}
+
+// frontendFiles lists the files the browser loads from web/.
+func frontendFiles(t *testing.T, patterns ...string) []string {
+	t.Helper()
+	files := []string{}
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
+	}
+	if len(files) == 0 {
+		t.Fatal("no front-end files found")
+	}
+	return files
+}
+
+// Nothing is loaded from another site: no CDN, web font or tracker, so the
+// pages work offline and leak nothing about their visitors. The SVG
+// namespace is an identifier, not a request.
+func TestFrontendLoadsNothingFromOtherSites(t *testing.T) {
+	remote := regexp.MustCompile(`(?i)(https?:)?//[a-z0-9][a-z0-9.-]*\.[a-z]{2,}`)
+	for _, file := range frontendFiles(t, "web/html/*.html", "web/templates/*.html", "web/css/*.css", "web/js/*.js", "web/json/*.json") {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range remote.FindAllString(string(raw), -1) {
+			if strings.HasSuffix(match, "www.w3.org") {
+				continue
+			}
+			t.Errorf("%s refers to another site: %s", file, match)
+		}
+	}
+}
+
+// The pages carry no inline script, event handler or style, and the scripts
+// never inject markup: every user value goes through textContent (core.js's
+// P.h). This is also what lets a strict Content-Security-Policy work.
+func TestFrontendHasNoInlineCodeOrMarkupInjection(t *testing.T) {
+	inlineScript := regexp.MustCompile(`(?i)<script(?:\s[^>]*)?>\s*[^<\s]`)
+	scriptTag := regexp.MustCompile(`(?i)<script\b[^>]*>`)
+	handler := regexp.MustCompile(`(?i)\son[a-z]+\s*=`)
+	style := regexp.MustCompile(`(?i)<style\b|\sstyle\s*=`)
+	for _, file := range frontendFiles(t, "web/html/*.html", "web/templates/*.html") {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := string(raw)
+		if inlineScript.MatchString(source) {
+			t.Errorf("%s has an inline script", file)
+		}
+		for _, tag := range scriptTag.FindAllString(source, -1) {
+			if !strings.Contains(tag, ` src="/js/`) {
+				t.Errorf("%s has a script without a same-origin src: %s", file, tag)
+			}
+		}
+		if handler.MatchString(source) {
+			t.Errorf("%s has an inline event handler", file)
+		}
+		if style.MatchString(source) {
+			t.Errorf("%s has inline styles", file)
+		}
+	}
+
+	injection := regexp.MustCompile(`\.(innerHTML|outerHTML)\s*[+]?=|insertAdjacentHTML|document\.write|\beval\(|new Function\(|\.setAttribute\(\s*["']on`)
+	for _, file := range frontendFiles(t, "web/js/*.js") {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if match := injection.FindString(string(raw)); match != "" {
+			t.Errorf("%s uses %q; build elements with P.h instead", file, match)
 		}
 	}
 }

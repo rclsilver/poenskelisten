@@ -481,7 +481,7 @@
 
     // api calls /api/<path>. It resolves with the decoded JSON and rejects
     // with an ApiError carrying the server's message. A 401 tries one token
-    // refresh (P.onUnauthorized, provided by functions.js) before giving up.
+    // refresh (P.onUnauthorized, provided by session.js) before giving up.
     P.api = function (method, path, body, options) {
         var opts = options || {};
         var headers = { "Accept": "application/json" };
@@ -1067,7 +1067,7 @@
     };
 
     // page runs a page once translations are loaded. init receives the main
-    // element. Signed-in pages go through P.session (functions.js) first.
+    // element. Signed-in pages go through startSession (session.js) first.
     P.page = function (options) {
         var start = function () {
             P.loadI18n().then(function () {

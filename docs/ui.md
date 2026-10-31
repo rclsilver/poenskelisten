@@ -68,3 +68,17 @@ Server information (read only, including the application name), invite codes (li
 ### Application name
 
 `poenskelisten_name` (flag `-name`, variable `name`) replaces "Pønskelisten" in page titles, the header, the sign-in pages, the web app manifest, e-mails, the TOTP issuer and token issuer. It is a server setting only, shown in the admin server information.
+
+## How the pages are built
+
+- **Templates.** Each page in `web/html` is a few lines: the shared `head`, `appnav` and `main` parts of `web/templates/layout.html`, plus its script. Static text in the templates carries `data-i18n` keys.
+- **Scripts.** `web/js/core.js` (DOM building, translations, preferences, API, images, dialogs, shared rules), `session.js` (OAuth + PKCE session), `cards.js` (list and wish cards, the wish board), `mfa.js` (MFA enrolment), then one script per page. They are plain scripts sharing the `P` namespace; no bundler, no dependency.
+- **Safety.** Pages never inject markup. `P.h` sets every user value with `textContent`, refuses inline handlers and only lets in-app paths and http(s) URLs into links, and same-origin, `data:image` and `blob:` URLs into images. Product links open with `rel="noopener noreferrer"`. Nothing is loaded from another site. `main_test.go` checks all of this on the source files.
+- **Translations.** `web/json/lang-en.json` and `lang-fr.json` hold the strings, with `{placeholders}`; `{app}` is the application name. The language is the saved choice, else the browser's, else English. `main_test.go` checks both files have the same keys and placeholders and that every key the pages use exists. To add a language, add `lang-<code>.json`, list the code in `P.LANGS` and offer it in the display menu (`layout.html`) and on the account page.
+- **Themes.** `web/css/app.css` holds the tokens of the light and dark themes. The dark theme follows the system unless the user chose one in the display menu; `theme.js` applies that choice before the first paint. `tests/web/theme.test.mjs` checks the contrast of every text colour.
+- **Application name.** The server puts it in the title, the header and an `application-name` meta tag (escaped by `html/template`); scripts read it back from there.
+- **Offline.** `service-worker.js` precaches `/offline` and the files it loads, and serves it when a page can't be reached. It never caches API answers.
+
+## Tests
+
+`go test ./...` renders every page through the router (with an application name full of special characters) and checks the dictionaries, the translation keys, the service worker's precache list and the source hygiene rules above. `node --test tests/web/*.test.mjs` runs the front-end unit tests in Node with a small fake DOM: `core.js` (escaping, URL rules, translations, sorting, roles, where a new wish goes, claim states, preferences), `cards.js` (what each viewer is offered) and the theme contrast. Neither replaces a look in a real browser: layout, focus order and screen reader output need a manual check.
