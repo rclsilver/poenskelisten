@@ -822,6 +822,7 @@ func setupRouterTest(t *testing.T) (*gin.Engine, func(userID uuid.UUID, admin bo
 	if err != nil {
 		t.Fatalf("failed to generate signing key: %v", err)
 	}
+	config.ConfigFile.RateLimitLogin = "off"
 	config.ConfigFile.PoenskelistenExternalURL = "https://wishlist.example.com"
 	config.ConfigFile.OAuthSigningKey = keyPEM
 	config.ConfigFile.OAuthSigningKeyID = kid

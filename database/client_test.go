@@ -517,6 +517,8 @@ func TestNilIDMatchesNothing(t *testing.T) {
 		mustFail("GetGroupMembershipByGroupIDAndMemberID", err)
 		groups, err := GetGroupsAUserIsAMemberOf(nilID)
 		mustNot("GetGroupsAUserIsAMemberOf", len(groups) > 0, err)
+		groups, err = GetGroupsFromWishlist(nilID)
+		mustNot("GetGroupsFromWishlist", len(groups) > 0, err)
 		wishlists, err = GetWishlistsFromGroup(nilID)
 		mustNot("GetWishlistsFromGroup", len(wishlists) > 0, err)
 
