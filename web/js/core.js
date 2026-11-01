@@ -482,7 +482,36 @@
     };
 
     P.MAX_IMAGE_BYTES = 10000000;
+    // Stored pictures are at most 1000x1000, so photos of more than 4 megapixels,
+    // which phones often take, are scaled down before sending: it costs no
+    // quality and keeps uploads and the server's decoding small.
+    P.MAX_IMAGE_PIXELS = 4000000;
     P.IMAGE_TYPES = ["image/jpeg", "image/png"];
+
+    P.fitImageSize = function (width, height, maxPixels) {
+        var scale = Math.min(1, Math.sqrt(maxPixels / (width * height)));
+        return {
+            width: Math.max(1, Math.floor(width * scale)),
+            height: Math.max(1, Math.floor(height * scale))
+        };
+    };
+
+    // Returns a smaller JPEG data URL, or null when the image already fits.
+    function shrinkImage(image) {
+        var size = P.fitImageSize(image.naturalWidth, image.naturalHeight, P.MAX_IMAGE_PIXELS);
+        if (size.width === image.naturalWidth && size.height === image.naturalHeight) {
+            return null;
+        }
+        var canvas = doc.createElement("canvas");
+        canvas.width = size.width;
+        canvas.height = size.height;
+        var context = canvas.getContext("2d");
+        // JPEG has no transparency; the server flattens on white too.
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, size.width, size.height);
+        context.drawImage(image, 0, 0, size.width, size.height);
+        return canvas.toDataURL("image/jpeg", 0.9);
+    }
 
     P.isImageDataUrl = function (value) {
         return typeof value === "string" && /^data:image\/(jpeg|png|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
@@ -516,7 +545,15 @@
                     return;
                 }
                 var probe = new root.Image();
-                probe.onload = function () { resolve(url); };
+                probe.onload = function () {
+                    var smaller = null;
+                    try {
+                        smaller = shrinkImage(probe);
+                    } catch (error) {
+                        // The server will say if the original is too large.
+                    }
+                    resolve(smaller || url);
+                };
                 probe.onerror = function () { reject(new Error(P.t("image.unreadable"))); };
                 probe.src = url;
             };
