@@ -141,6 +141,16 @@ test("image checks accept JPEG and PNG up to 10 MB", () => {
     assert.ok(!P.isImageDataUrl("javascript:alert(1)"));
 });
 
+test("stored WebP pictures are shown", () => {
+    const { P } = loadCore();
+    const webp = "data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
+    assert.ok(P.isImageDataUrl(webp));
+    assert.equal(P.safeImageSrc(webp), webp);
+    assert.ok(!P.isImageDataUrl("data:image/webpx;base64,UklGRg=="));
+    assert.ok(!P.isImageDataUrl("data:image/gif;base64,R0lGODlh"));
+    assert.equal(P.safeImageSrc("data:image/webp;base64,UklGR\"><script>"), "");
+});
+
 test("large images are scaled down to the server's pixel limit", () => {
     const { P } = loadCore();
     const fit = (width, height) => {
