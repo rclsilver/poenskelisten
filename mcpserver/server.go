@@ -11,6 +11,7 @@ import (
 	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/logger"
+	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/utilities"
 	"context"
 	"encoding/json"
@@ -79,9 +80,11 @@ type groupOut struct {
 }
 
 // Handler builds the MCP server and returns a gin handler that guards it with
-// OAuth bearer validation. Serves 404 when MCP is disabled.
-func Handler() gin.HandlerFunc {
-	server := buildServer()
+// OAuth bearer validation. Serves 404 when MCP is disabled. The tools that
+// take an image count it in uploads, the budget of the web routes that take
+// one; nil turns that limit off.
+func Handler(uploads *middlewares.UploadBudget) gin.HandlerFunc {
+	server := buildServer(uploads)
 
 	streamable := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return server },
@@ -118,7 +121,21 @@ func verifyToken(_ context.Context, token string, _ *http.Request) (*mcpauth.Tok
 	return info, nil
 }
 
-func buildServer() *mcp.Server {
+// MaxBodyBytes is how large a request to /mcp may be: enough for an image
+// only with a valid token. Without one the SDK answers 401 before reading the
+// body anyway; with one, a tool call carrying an image can't be told from any
+// other before its JSON has been read.
+func MaxBodyBytes(r *http.Request) int64 {
+	fields := strings.Fields(r.Header.Get("Authorization"))
+	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+		if _, err := verifyToken(r.Context(), fields[1], r); err == nil {
+			return middlewares.ImageUploadMaxBodyBytes
+		}
+	}
+	return middlewares.DefaultMaxBodyBytes
+}
+
+func buildServer(uploads *middlewares.UploadBudget) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "poenskelisten",
 		Version: config.ConfigFile.PoenskelistenVersion,
@@ -146,7 +163,7 @@ func buildServer() *mcp.Server {
 	}, listGroups)
 
 	registerWishlistWriteTools(server)
-	registerWishWriteTools(server)
+	registerWishWriteTools(server, uploads)
 	registerClaimTools(server)
 	registerGroupTools(server)
 	registerSharingTools(server)

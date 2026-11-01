@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // maxTrackedKeys caps how many clients a limiter remembers at once, so a flood
@@ -195,11 +196,15 @@ func setRetryAfter(ctx *gin.Context, wait time.Duration) {
 	ctx.Header("Retry-After", strconv.Itoa(seconds))
 }
 
+func userKey(userID uuid.UUID) string {
+	return "user " + userID.String()
+}
+
 // accountKey is the account a request is signed in as, or its clientKey when
 // it carries no valid access token.
 func accountKey(ctx *gin.Context) string {
 	if userID, err := GetAuthUsername(ctx.GetHeader("Authorization")); err == nil {
-		return "user " + userID.String()
+		return userKey(userID)
 	}
 	return clientKey(ctx)
 }
@@ -211,13 +216,16 @@ func limitRequests(max int, window time.Duration, key func(*gin.Context) string,
 	if max <= 0 {
 		return func(ctx *gin.Context) { ctx.Next() }
 	}
-	limiter := newRateLimiter(max, window)
+	return limitWith(newRateLimiter(max, window), key, respond)
+}
+
+func limitWith(limiter *rateLimiter, key func(*gin.Context) string, respond func(*gin.Context)) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		key := key(ctx)
 		allowed, retryAfter, firstRefusal := limiter.allow(key)
 		if !allowed {
 			if firstRefusal {
-				logger.Log.Warn("rate limit reached for " + key + " on " + ctx.Request.Method + " " + ctx.FullPath() + "; refusing its requests for up to " + window.String() + ".")
+				logger.Log.Warn("rate limit reached for " + key + " on " + ctx.Request.Method + " " + ctx.FullPath() + "; refusing its requests for up to " + limiter.window.String() + ".")
 			}
 			setRetryAfter(ctx, retryAfter)
 			respond(ctx)
@@ -247,13 +255,49 @@ func APIRateLimit(max int, window time.Duration) gin.HandlerFunc {
 	})
 }
 
-// UploadRateLimit limits the routes that can carry an image per account
+// TooManyUploads answers a request over its account's upload budget.
+const TooManyUploads = "Too many changes in a short time. Please wait a few minutes and try again."
+
+// UploadBudget counts, per account, the requests that can carry an image:
+// on the web routes, through Limit, and in the MCP tools, through Allow. They
+// share it, so neither is a way around the other's limit. It is per account
 // rather than per address, so people sharing a home connection each get
-// their own budget.
-func UploadRateLimit(max int, window time.Duration) gin.HandlerFunc {
-	return limitRequests(max, window, accountKey, func(ctx *gin.Context) {
-		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many changes in a short time. Please wait a few minutes and try again."})
+// their own. A nil *UploadBudget (the limit turned off) allows everything.
+type UploadBudget struct {
+	limiter *rateLimiter
+}
+
+// NewUploadBudget allows max requests per account within window; a
+// non-positive max turns it off.
+func NewUploadBudget(max int, window time.Duration) *UploadBudget {
+	if max <= 0 {
+		return nil
+	}
+	return &UploadBudget{limiter: newRateLimiter(max, window)}
+}
+
+// Limit is the middleware for the web routes that can carry an image.
+func (b *UploadBudget) Limit() gin.HandlerFunc {
+	if b == nil {
+		return func(ctx *gin.Context) { ctx.Next() }
+	}
+	return limitWith(b.limiter, accountKey, func(ctx *gin.Context) {
+		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": TooManyUploads})
 	})
+}
+
+// Allow counts an image sent by userID through what (an MCP tool), and
+// reports whether it fits the budget.
+func (b *UploadBudget) Allow(userID uuid.UUID, what string) bool {
+	if b == nil {
+		return true
+	}
+	key := userKey(userID)
+	allowed, _, firstRefusal := b.limiter.allow(key)
+	if !allowed && firstRefusal {
+		logger.Log.Warn("rate limit reached for " + key + " on " + what + "; refusing its uploads for up to " + b.limiter.window.String() + ".")
+	}
+	return allowed
 }
 
 // AttemptLimiter counts failed attempts per account rather than per address,
