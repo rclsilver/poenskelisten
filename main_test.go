@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	textTemplate "text/template"
 	"time"
@@ -1114,6 +1115,75 @@ func TestInitRouterTakesLargeMCPImages(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("a body over 15 MB with a valid token = %d, want 413", w.Code)
 	}
+}
+
+// Decoding a request that carries an image takes about ten copies of its
+// body, so a burst of them could exhaust the container's memory. Only two
+// large bodies, from the web and MCP alike, are read at a time: a third
+// waits for one of them to finish before anything reads it.
+func TestInitRouterReadsTwoLargeBodiesAtATime(t *testing.T) {
+	_, token := setupRouterTest(t)
+	config.ConfigFile.MCPEnabled = true
+	router := initRouter(config.ConfigFile)
+	user := createRouterUser(t, "Alice", false)
+	now := time.Now()
+	list := models.Wishlist{Name: "Alice list", Enabled: true, OwnerID: user.ID, Date: &now}
+	list.ID = uuid.New()
+	createRouterRecord(t, &list)
+	mcpToken, err := auth.GenerateOAuthAccessToken(user.ID, "mcp-client", config.MCPResource(), "mcp:wishlists.write", false, true)
+	if err != nil {
+		t.Fatalf("failed to sign MCP token: %v", err)
+	}
+
+	// Each request's body is a pipe: a write to it returns only once the
+	// handler reads it.
+	var handled sync.WaitGroup
+	start := func(path, authorization string) *io.PipeWriter {
+		body, write := io.Pipe()
+		request := httptest.NewRequest(http.MethodPost, path, body)
+		request.ContentLength = 2 << 20
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		request.Header.Set("Authorization", authorization)
+		handled.Add(1)
+		go func() {
+			defer handled.Done()
+			router.ServeHTTP(httptest.NewRecorder(), request)
+		}()
+		return write
+	}
+	read := func(write *io.PipeWriter, within time.Duration) bool {
+		written := make(chan error, 1)
+		go func() {
+			_, err := write.Write([]byte("{"))
+			written <- err
+		}()
+		select {
+		case err := <-written:
+			return err == nil
+		case <-time.After(within):
+			return false
+		}
+	}
+
+	first := start("/mcp", "Bearer "+mcpToken)
+	second := start("/mcp", "Bearer "+mcpToken)
+	if !read(first, 5*time.Second) || !read(second, 5*time.Second) {
+		t.Fatal("the first two large bodies weren't read")
+	}
+	third := start("/api/auth/wishes?wishlist="+list.ID.String(), token(user.ID, false))
+	if read(third, 300*time.Millisecond) {
+		t.Error("a third large body was read while two others were")
+	}
+
+	first.CloseWithError(io.ErrUnexpectedEOF)
+	if !read(third, 5*time.Second) {
+		t.Error("the third large body wasn't read once a slot freed")
+	}
+	for _, write := range []*io.PipeWriter{second, third} {
+		write.CloseWithError(io.ErrUnexpectedEOF)
+	}
+	handled.Wait()
 }
 
 func TestInitRouterRateLimitsCanBeTurnedOff(t *testing.T) {

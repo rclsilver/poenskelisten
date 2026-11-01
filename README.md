@@ -169,7 +169,7 @@ Write a limit as `<requests>/<duration>` (durations like `30s`, `15m`, `1h`), or
 
 ### Images and memory
 
-Uploaded images (JPG or PNG, up to 10 MB) can have at most 4 megapixels, such as 2000x2000; the web app scales larger photos down before sending them. They are stored at most 1000x1000, with a 250x250 thumbnail. Decoding one still takes tens of megabytes for a moment, so at most two are processed at a time.
+Uploaded images (JPG or PNG, up to 10 MB) can have at most 4 megapixels, such as 2000x2000; the web app scales larger photos down before sending them. They are stored at most 1000x1000, with a 250x250 thumbnail. Reading and decoding a request that carries one takes about ten copies of its body, some 100 MB for a 10 MB image, so at most two such requests, over 1 MB, are read at a time, from the web app and MCP together. The others wait up to 30 seconds for their turn, then get `503` with a `Retry-After` header.
 
 In a container with a memory limit, set the `GOMEMLIMIT` environment variable a little below it, for example `GOMEMLIMIT=400MiB` for a 512 MiB limit. Go then collects garbage harder as it nears that amount, rather than letting the container be killed for running out of memory.
 

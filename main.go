@@ -216,6 +216,10 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	uploadRateLimit := config.UploadRateLimit(configFile)
 	uploads := middlewares.NewUploadBudget(uploadRateLimit.Max, uploadRateLimit.Window)
 	uploadLimit := uploads.Limit()
+	// Decoding a request that carries an image takes about ten copies of its
+	// body, some 100 MB for a 10 MB image, whether on the web or through MCP:
+	// two at a time across both keep a burst within a 512 MB container.
+	largeBodies := middlewares.LargeBodies(2, middlewares.DefaultMaxBodyBytes, 30*time.Second)
 	// What turns a password, a code or the sign-in cookie into a session or
 	// a consent only takes requests from Pønskelisten's own pages.
 	sameOrigin := middlewares.SameOrigin()
@@ -290,11 +294,11 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			auth.GET("/wishlists/:wishlist_id/categories", controllers.APIGetWishlistCategories)
 
 			auth.GET("/wishes", controllers.GetWishesFromWishlist)
-			auth.POST("/wishes", uploadLimit, controllers.RegisterWish)
+			auth.POST("/wishes", uploadLimit, largeBodies, controllers.RegisterWish)
 			auth.DELETE("/wishes/:wish_id", controllers.DeleteWish)
 			auth.POST("/wishes/:wish_id/claim", controllers.RegisterWishClaim)
 			auth.POST("/wishes/:wish_id/unclaim", controllers.RemoveWishClaim)
-			auth.POST("/wishes/:wish_id", uploadLimit, controllers.APIUpdateWish)
+			auth.POST("/wishes/:wish_id", uploadLimit, largeBodies, controllers.APIUpdateWish)
 			auth.GET("/wishes/:wish_id", controllers.APIGetWish)
 
 			auth.GET("/news", controllers.GetNews)
@@ -304,7 +308,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			auth.GET("/users/:user_id/image", controllers.APIGetUserProfileImage)
 			auth.GET("/users", controllers.GetUsers)
 			// These two check the current password.
-			auth.POST("/users/update", loginLimit, uploadLimit, controllers.UpdateUser)
+			auth.POST("/users/update", loginLimit, uploadLimit, largeBodies, controllers.UpdateUser)
 
 			auth.POST("/users/mfa/disable", loginLimit, controllers.APIDisableMFA)
 		}
@@ -425,7 +429,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	router.POST("/oauth/register", middlewares.RateLimit(registerRateLimit.Max, registerRateLimit.Window), controllers.APIOAuthRegister)
 
 	// MCP resource server (self-gates on MCPEnabled; OAuth-protected).
-	router.Any("/mcp", mcpserver.Handler(uploads))
+	router.Any("/mcp", largeBodies, mcpserver.Handler(uploads))
 
 	return router
 }
