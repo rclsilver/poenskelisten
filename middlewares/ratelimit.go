@@ -72,15 +72,20 @@ func (r *rateLimiter) allow(key string) (allowed bool, retryAfter time.Duration,
 }
 
 // blocked reports whether key has used up its budget, without recording a hit.
+// A key the limiter is too full to track counts as blocked: its hits couldn't
+// be recorded.
 func (r *rateLimiter) blocked(key string) (bool, time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := r.now()
 	entry, exists := r.entries[key]
 	if !exists {
+		if r.full(now) {
+			return true, r.window
+		}
 		return false, 0
 	}
-	now := r.now()
 	entry.hits = recentHits(entry.hits, now.Add(-r.window))
 	if len(entry.hits) < r.max {
 		return false, 0
@@ -123,17 +128,24 @@ func (r *rateLimiter) liveEntry(key string, now time.Time) (*rateLimitEntry, boo
 	}
 	entry, exists := r.entries[key]
 	if !exists {
-		if len(r.entries) >= maxTrackedKeys {
-			r.sweep(now)
-			if len(r.entries) >= maxTrackedKeys {
-				return nil, false
-			}
+		if r.full(now) {
+			return nil, false
 		}
 		entry = &rateLimitEntry{}
 		r.entries[key] = entry
 	}
 	entry.hits = recentHits(entry.hits, now.Add(-r.window))
 	return entry, true
+}
+
+// full reports whether there's no room for another key, even after dropping
+// the keys whose window has passed. Callers hold r.mu.
+func (r *rateLimiter) full(now time.Time) bool {
+	if len(r.entries) < maxTrackedKeys {
+		return false
+	}
+	r.sweep(now)
+	return len(r.entries) >= maxTrackedKeys
 }
 
 // sweep drops every key with no hit left in the window. Callers hold r.mu.
@@ -249,8 +261,9 @@ func UploadRateLimit(max int, window time.Duration) gin.HandlerFunc {
 // over many addresses. Once an account has used up its budget, sign-in for it
 // is refused without checking anything until its oldest failure leaves the
 // window. That also locks out the real user meanwhile, which is the price of
-// stopping the guessing; the window keeps it short. A nil *AttemptLimiter
-// (the limit turned off) never blocks.
+// stopping the guessing; the window keeps it short. While it tracks as many
+// accounts as it can, the others are refused as if locked rather than left to
+// guess uncounted. A nil *AttemptLimiter (the limit turned off) never blocks.
 type AttemptLimiter struct {
 	limiter *rateLimiter
 }

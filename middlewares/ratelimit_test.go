@@ -341,6 +341,33 @@ func TestAttemptLimiterLocksAfterFailures(t *testing.T) {
 	}
 }
 
+// Failures of an account the limiter has no room for can't be counted, so it
+// must not be left open to unlimited guessing meanwhile.
+func TestAttemptLimiterLocksUntrackedKeysWhenFull(t *testing.T) {
+	attempts := NewAttemptLimiter(3, time.Minute)
+	clock := &fakeClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	attempts.limiter.now = clock.Now
+	for i := 0; i < maxTrackedKeys; i++ {
+		attempts.limiter.entries[strconv.Itoa(i)] = &rateLimitEntry{hits: []time.Time{clock.Now()}}
+	}
+	attempts.limiter.nextSweep = clock.Now().Add(time.Minute)
+
+	for i := 0; i < 5; i++ {
+		attempts.Failed("newcomer")
+	}
+	if locked, retryAfter := attempts.Blocked("newcomer"); !locked || retryAfter != time.Minute {
+		t.Errorf("untracked key while full: Blocked = %v, %v; want locked for the window", locked, retryAfter)
+	}
+	if locked, _ := attempts.Blocked("0"); locked {
+		t.Error("a tracked key below its budget shouldn't be locked")
+	}
+
+	clock.Advance(2 * time.Minute)
+	if locked, _ := attempts.Blocked("newcomer"); locked {
+		t.Error("the key should be open once the stale keys are swept")
+	}
+}
+
 func TestAttemptLimiterSuccessClears(t *testing.T) {
 	attempts := NewAttemptLimiter(2, time.Minute)
 	attempts.Failed("k")
