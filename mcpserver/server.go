@@ -232,7 +232,7 @@ func getPublicWishlist(ctx context.Context, _ *mcp.CallToolRequest, args publicW
 		return nil, nil, err
 	}
 
-	hash, err := uuid.Parse(strings.TrimSpace(args.PublicHash))
+	hash, err := utilities.ParseID(strings.TrimSpace(args.PublicHash))
 	if err != nil {
 		return nil, nil, errors.New("invalid public_hash")
 	}
