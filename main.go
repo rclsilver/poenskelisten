@@ -194,6 +194,9 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	// The routes that can carry an image share a budget per account.
 	uploadRateLimit := config.UploadRateLimit(configFile)
 	uploadLimit := middlewares.UploadRateLimit(uploadRateLimit.Max, uploadRateLimit.Window)
+	// What turns a password, a code or the sign-in cookie into a session or
+	// a consent only takes requests from Pønskelisten's own pages.
+	sameOrigin := middlewares.SameOrigin()
 
 	// API endpoint
 	api := router.Group("/api")
@@ -203,21 +206,21 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			// Password-based entry points; all refused when local login is
 			// disabled (OIDC-only), see middlewares.RequireLocalLogin.
 			localLogin := middlewares.RequireLocalLogin()
-			open.POST("/tokens/register", loginLimit, localLogin, controllers.GenerateToken)
+			open.POST("/tokens/register", loginLimit, sameOrigin, localLogin, controllers.GenerateToken)
 
 			open.POST("/users", loginLimit, localLogin, controllers.RegisterUser)
 			open.POST("/users/reset", loginLimit, localLogin, controllers.APIResetPassword)
 			open.GET("/users/reset/:resetCode", loginLimit, localLogin, controllers.APIVerifyResetCode)
 			open.POST("/users/password", loginLimit, localLogin, controllers.APIChangePassword)
-			open.POST("/users/verify/:code", loginLimit, controllers.VerifyUser)
+			open.POST("/users/verify/:code", loginLimit, sameOrigin, controllers.VerifyUser)
 			open.POST("/users/verification", loginLimit, controllers.SendUserVerificationCode)
 
 			// MFA enrollment is reachable during the login gate (SSO-authed), so it
 			// lives under /open: a user forced to enroll has no access token yet.
-			open.POST("/users/mfa/enroll", loginLimit, controllers.APIEnrollMFA)
-			open.POST("/users/mfa/activate", loginLimit, controllers.APIActivateMFA)
+			open.POST("/users/mfa/enroll", loginLimit, sameOrigin, controllers.APIEnrollMFA)
+			open.POST("/users/mfa/activate", loginLimit, sameOrigin, controllers.APIActivateMFA)
 
-			open.POST("/tokens/mfa", loginLimit, localLogin, controllers.APIValidateMFA)
+			open.POST("/tokens/mfa", loginLimit, sameOrigin, localLogin, controllers.APIValidateMFA)
 
 			open.GET("/oidc/config", controllers.APIGetOIDCConfig)
 			open.GET("/oidc/login", controllers.OIDCLogin)
@@ -391,7 +394,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 
 	// OAuth 2.1 authorization server endpoints (also outside /api).
 	router.GET("/oauth/authorize", oauthLimit, controllers.APIOAuthAuthorize)
-	router.POST("/oauth/consent", oauthLimit, controllers.APIOAuthConsent)
+	router.POST("/oauth/consent", oauthLimit, sameOrigin, controllers.APIOAuthConsent)
 	router.POST("/oauth/token", oauthLimit, controllers.APIOAuthToken)
 	router.POST("/oauth/revoke", oauthLimit, controllers.APIOAuthRevoke)
 	// Open dynamic client registration (RFC 7591), rate-limited per IP.
