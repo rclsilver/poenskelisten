@@ -266,7 +266,7 @@ func GetUser(context *gin.Context) {
 			context.Abort()
 			return
 		}
-		userObject = withoutEmail(userObject)
+		userObject = database.UserProfile(userObject)
 	}
 
 	// Reply
@@ -392,22 +392,13 @@ func GetUsers(context *gin.Context) {
 	if !requestingUserObject.Admin {
 		for i := range users {
 			if users[i].ID != userID {
-				users[i] = withoutEmail(users[i])
+				users[i] = database.UserProfile(users[i])
 			}
 		}
 	}
 
 	// Reply
 	context.JSON(http.StatusOK, gin.H{"users": users, "message": "Users retrieved."})
-}
-
-// withoutEmail withholds a user's e-mail address, for responses to anyone but
-// the user and admins. The web app only shows an address to those two, and
-// without this the user list hands any account the address of every other
-// account on the instance, whether or not they share anything.
-func withoutEmail(user models.User) models.User {
-	user.Email = nil
-	return user
 }
 
 func VerifyUser(context *gin.Context) {

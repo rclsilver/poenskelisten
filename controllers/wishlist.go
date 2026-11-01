@@ -1055,7 +1055,7 @@ func APIUpdateWishlist(context *gin.Context) {
 func ConvertWishlistCollaboratorToWishlistCollaboratorObject(wishlistCollab models.WishlistCollaborator) (wishlistCollabObject models.WishlistCollaboratorObject, err error) {
 	wishlistCollabObject = models.WishlistCollaboratorObject{}
 
-	userObject, err := database.GetUserInformation(wishlistCollab.UserID)
+	userObject, err := database.GetUserProfile(wishlistCollab.UserID)
 	if err != nil {
 		logger.Log.Error("Failed to get user information for user ID '" + wishlistCollab.ID.String() + "'. Returning. Error: " + err.Error())
 		return wishlistCollabObject, errors.New("Failed to get user information for user ID '" + wishlistCollab.ID.String() + "'.")
@@ -1113,7 +1113,7 @@ func ConvertWishlistToWishlistObject(wishlist models.Wishlist, RequestUserID *uu
 		return models.WishlistUser{}, err
 	}
 
-	owner, err := database.GetUserInformation(wishlist.OwnerID)
+	owner, err := database.GetUserProfile(wishlist.OwnerID)
 	if err != nil {
 		logger.Log.Error("Failed to get information of wishlist owner '" + wishlist.OwnerID.String() + "'. Returning. Error: " + err.Error())
 		return models.WishlistUser{}, err
