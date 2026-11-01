@@ -10,6 +10,7 @@ import (
 	"aunefyren/poenskelisten/models"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -1054,6 +1055,64 @@ func TestInitRouterLimitsMCPBodiesWithoutAToken(t *testing.T) {
 	}
 	if code := post("Bearer " + mcpToken); code == http.StatusRequestEntityTooLarge {
 		t.Error("a valid MCP token: the body was refused as too large")
+	}
+}
+
+// The MCP tools take an image of up to 10 MB, more than the 4 MiB the SDK
+// reads by default: one of about 5 MB must go through, and a body over the
+// app's own limit must still be refused.
+func TestInitRouterTakesLargeMCPImages(t *testing.T) {
+	setupRouterTest(t)
+	config.ConfigFile.MCPEnabled = true
+	t.Cleanup(controllers.UseWishImageDir(t.TempDir()))
+	router := initRouter(config.ConfigFile)
+
+	user := createRouterUser(t, "Alice", false)
+	now := time.Now()
+	list := models.Wishlist{Name: "Alice list", Enabled: true, OwnerID: user.ID, Date: &now}
+	list.ID = uuid.New()
+	createRouterRecord(t, &list)
+	wish := models.Wish{Name: "Headphones", Enabled: true, OwnerID: user.ID, WishlistID: list.ID}
+	wish.ID = uuid.New()
+	createRouterRecord(t, &wish)
+
+	// Noise, stored uncompressed: about 5 MB of PNG, 1.7 megapixels.
+	noise := image.NewNRGBA(image.Rect(0, 0, 1300, 1300))
+	if _, err := rand.Read(noise.Pix); err != nil {
+		t.Fatalf("failed to make the image: %v", err)
+	}
+	for i := 3; i < len(noise.Pix); i += 4 {
+		noise.Pix[i] = 255
+	}
+	var picture bytes.Buffer
+	if err := (&png.Encoder{CompressionLevel: png.NoCompression}).Encode(&picture, noise); err != nil {
+		t.Fatalf("failed to encode the image: %v", err)
+	}
+	if picture.Len() < 5_000_000 {
+		t.Fatalf("test image is %d bytes, want about 5 MB", picture.Len())
+	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(picture.Bytes())
+
+	session := mcpSession(t, router, user.ID, "mcp:wishlists.read mcp:wishlists.write")
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "update_wish", Arguments: map[string]any{"wish_id": wish.ID.String(), "image": dataURI}})
+	if err != nil || result.IsError {
+		t.Fatalf("a %d-byte image through MCP was refused: %v %+v", picture.Len(), err, result)
+	}
+	if stored, err := controllers.CheckIfWishImageExists(wish.ID); err != nil || !stored {
+		t.Errorf("the image wasn't stored (%v)", err)
+	}
+
+	token, err := auth.GenerateOAuthAccessToken(user.ID, "mcp-client", config.MCPResource(), "mcp:wishlists.write", false, true)
+	if err != nil {
+		t.Fatalf("failed to sign MCP token: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(strings.Repeat("x", int(middlewares.ImageUploadMaxBodyBytes)+1)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, request)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("a body over 15 MB with a valid token = %d, want 413", w.Code)
 	}
 }
 
