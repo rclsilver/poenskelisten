@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"flag"
 	"image"
+	"image/color"
 	"image/png"
 	"io"
 	"net/http"
@@ -1114,6 +1115,81 @@ func TestInitRouterTakesLargeMCPImages(t *testing.T) {
 	router.ServeHTTP(w, request)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("a body over 15 MB with a valid token = %d, want 413", w.Code)
+	}
+}
+
+// A transparent PNG sent from the web or through MCP is stored as WebP, both
+// sizes, with its transparency.
+func TestInitRouterStoresTransparentPNGsAsWebP(t *testing.T) {
+	_, token := setupRouterTest(t)
+	config.ConfigFile.MCPEnabled = true
+	dir := t.TempDir()
+	t.Cleanup(controllers.UseWishImageDir(dir))
+	router := initRouter(config.ConfigFile)
+
+	user := createRouterUser(t, "Alice", false)
+	now := time.Now()
+	list := models.Wishlist{Name: "Alice list", Enabled: true, OwnerID: user.ID, Date: &now}
+	list.ID = uuid.New()
+	createRouterRecord(t, &list)
+	mcpWish := models.Wish{Name: "Headphones", Enabled: true, OwnerID: user.ID, WishlistID: list.ID}
+	mcpWish.ID = uuid.New()
+	createRouterRecord(t, &mcpWish)
+
+	// Left half transparent, right half opaque red.
+	picture := image.NewNRGBA(image.Rect(0, 0, 40, 40))
+	for y := 0; y < 40; y++ {
+		for x := 20; x < 40; x++ {
+			picture.Set(x, y, color.NRGBA{R: 255, A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, picture); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(encoded.Bytes())
+
+	body := `{"name":"Desk lamp","image_data":"` + dataURI + `"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/wishes?wishlist="+list.ID.String(), strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", token(user.ID, false))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, request)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("web upload = %d %s, want 201", w.Code, w.Body.String())
+	}
+	var webWish models.Wish
+	if err := database.Instance.Where("name = ?", "Desk lamp").First(&webWish).Error; err != nil {
+		t.Fatalf("the web wish wasn't created: %v", err)
+	}
+
+	session := mcpSession(t, router, user.ID, "mcp:wishlists.read mcp:wishlists.write")
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "update_wish", Arguments: map[string]any{"wish_id": mcpWish.ID.String(), "image": dataURI}})
+	if err != nil || result.IsError {
+		t.Fatalf("MCP upload refused: %v %+v", err, result)
+	}
+
+	for source, id := range map[string]uuid.UUID{"web": webWish.ID, "MCP": mcpWish.ID} {
+		for _, name := range []string{id.String() + ".jpg", id.String() + "_thumbnail.jpg"} {
+			stored, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("%s: %s wasn't stored: %v", source, name, err)
+			}
+			if len(stored) < 12 || string(stored[:4]) != "RIFF" || string(stored[8:12]) != "WEBP" {
+				t.Fatalf("%s: %s starts with %q, want a RIFF WEBP file", source, name, stored[:min(len(stored), 12)])
+			}
+			img, format, err := image.Decode(bytes.NewReader(stored))
+			if err != nil || format != "webp" {
+				t.Fatalf("%s: %s decoded as %q: %v", source, name, format, err)
+			}
+			b := img.Bounds()
+			if _, _, _, a := img.At(b.Min.X+b.Dx()/4, b.Min.Y+b.Dy()/2).RGBA(); a != 0 {
+				t.Errorf("%s: %s: transparent half stored with alpha %d, want 0", source, name, a>>8)
+			}
+			if r, _, _, a := img.At(b.Min.X+b.Dx()*3/4, b.Min.Y+b.Dy()/2).RGBA(); a>>8 != 255 || r>>8 < 200 {
+				t.Errorf("%s: %s: opaque half stored as red %d alpha %d, want opaque red", source, name, r>>8, a>>8)
+			}
+		}
 	}
 }
 

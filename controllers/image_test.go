@@ -1223,9 +1223,9 @@ func TestSaveWishImageWriteFails(t *testing.T) {
 	}
 }
 
-func TestEncodeJPEGTooLarge(t *testing.T) {
-	// JPEG can't encode a dimension of 65536 or more.
-	img := image.NewGray(image.Rect(0, 0, 1<<16, 1))
+func TestEncodeWebPTooLarge(t *testing.T) {
+	// WebP can't encode a dimension over 16383.
+	img := image.NewGray(image.Rect(0, 0, 16384, 1))
 	if data, err := encodeWebP(img); err == nil || data != nil {
 		t.Errorf("encodeWebP = (%d bytes, %v), want an error", len(data), err)
 	}
