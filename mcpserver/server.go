@@ -134,7 +134,7 @@ func buildServer() *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_public_wishlist",
-		Description: "Read a public wishlist from its public_hash (the UUID in a shared public link). Read-only.",
+		Description: "Read a public wishlist from its public_hash (the UUID in a shared public link). Read-only; it never says whether a wish is claimed.",
 	}, getPublicWishlist)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -232,14 +232,9 @@ func getPublicWishlist(ctx context.Context, _ *mcp.CallToolRequest, args publicW
 		return nil, nil, errors.New("public wishlist not found")
 	}
 
-	// The caller may well be the owner or a collaborator opening their own
-	// public link: they must not see claims there either.
-	r, err := resolveRole(userID, wishlist.ID)
-	if err != nil && !errors.Is(err, errNoAccess) {
-		return nil, nil, errors.New("failed to load wishlist")
-	}
-
-	wishes, err := wishesOf(wishlist.ID, userID, r)
+	// Like the public page, a public link never tells whether a wish is
+	// claimed, whoever follows it; group members see claims with list_wishes.
+	wishes, err := wishesOf(wishlist.ID, userID, "")
 	if err != nil {
 		return nil, nil, errors.New("failed to load wishes")
 	}

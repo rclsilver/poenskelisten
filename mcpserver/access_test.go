@@ -169,7 +169,7 @@ func TestClaimsVisible(t *testing.T) {
 		{"collaborator", roleCollaborator, author, false},
 		{"group member", roleGroupMember, author, true},
 		{"group member who wrote the wish", roleGroupMember, viewer, false},
-		{"public stranger", "", author, true},
+		{"public link reader", "", author, false},
 	}
 	for _, c := range cases {
 		if got := claimsVisible(c.r, c.wishBy, viewer); got != c.want {

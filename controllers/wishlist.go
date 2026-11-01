@@ -1434,6 +1434,13 @@ func GetPublicWishlist(context *gin.Context) {
 		return
 	}
 
+	// A public wishlist can't be claimed, so a claim on it is left over from
+	// before it was made public, and whoever holds the link may be its owner
+	// or a collaborator: the public view carries no claim at all.
+	for i := range wishlistObject.Wishes {
+		wishlistObject.Wishes[i].WishClaim = []models.WishClaimObject{}
+	}
+
 	// Sort wishlist wishes by creation date
 	sort.Slice(wishlistObject.Wishes, func(i, j int) bool {
 		return wishlistObject.Wishes[j].CreatedAt.Before(wishlistObject.Wishes[i].CreatedAt)

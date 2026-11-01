@@ -502,23 +502,21 @@ func TestGetPublicWishlistTool(t *testing.T) {
 	}
 	wish := createMCPWish(t, owner, wishlist, "Headphones")
 	createMCPClaim(t, claimer, wish)
+	member := createMCPTestUser(t, "Fay")
+	shareMCPWishlist(t, owner, wishlist, member, claimer)
 	args := map[string]any{"public_hash": hash.String()}
 
-	// A stranger reading the public link sees the wish and its claim.
-	var got publicWishlistOut
-	callTool(t, viewer.ID, "get_public_wishlist", args, &got)
-	if got.Name != "Birthday" || got.Owner != "Ada" || len(got.Wishes) != 1 {
-		t.Fatalf("got %+v, want the Birthday list with one wish", got)
-	}
-	if got.Wishes[0].Claimed == nil || !*got.Wishes[0].Claimed {
-		t.Errorf("stranger: got %+v, want the claim visible", got.Wishes[0])
-	}
-
-	// The owner opening their own public link must not see the claim.
-	got = publicWishlistOut{} // json.Unmarshal would keep the stale Claimed pointer
-	callTool(t, owner.ID, "get_public_wishlist", args, &got)
-	if len(got.Wishes) != 1 || got.Wishes[0].Claimed != nil || got.Wishes[0].ClaimedBy != "" {
-		t.Errorf("owner: claim leaked: %+v", got.Wishes)
+	// A claim left from before the list was made public is never shown
+	// through the link, whoever follows it.
+	for _, reader := range []models.User{viewer, member, claimer, owner} {
+		var got publicWishlistOut
+		callTool(t, reader.ID, "get_public_wishlist", args, &got)
+		if got.Name != "Birthday" || got.Owner != "Ada" || len(got.Wishes) != 1 {
+			t.Fatalf("%s: got %+v, want the Birthday list with one wish", reader.FirstName, got)
+		}
+		if got.Wishes[0].Claimed != nil || got.Wishes[0].ClaimedBy != "" {
+			t.Errorf("%s: claim leaked: %+v", reader.FirstName, got.Wishes[0])
+		}
 	}
 }
 

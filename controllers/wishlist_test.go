@@ -2214,6 +2214,37 @@ func TestGetPublicWishlistWishesNewestFirst(t *testing.T) {
 	}
 }
 
+// A claim made while the list was claimable stays when it is made public. The
+// link holder may be the owner or a collaborator, so the public view carries
+// no claim, with or without hidden claimers.
+func TestGetPublicWishlistCarriesNoClaims(t *testing.T) {
+	for _, hideClaimers := range []bool{false, true} {
+		setupControllersDB(t)
+		owner, claimant := createTestUser(t), createTestUser(t)
+		wishlist := wishlistTestPublic(t, owner.ID)
+		wishlist = wishlistTestSave(t, wishlist, func(w *models.Wishlist) { w.HideClaimers = boolPtr(hideClaimers) })
+		wish := createTestWish(t, owner.ID, wishlist.ID)
+		wishTestSeedClaim(t, wish.ID, claimant.ID)
+
+		code, resp := wlDo(GetPublicWishlist, "GET", "/api/open/wishlists/public/"+wishlist.PublicHash.String(), "", "",
+			gin.Params{{Key: "wishlist_hash", Value: wishlist.PublicHash.String()}})
+		if code != 200 {
+			t.Fatalf("hide_claimers=%v: status = %d, want 200; body=%v", hideClaimers, code, resp)
+		}
+		obj, _ := resp["wishlist"].(map[string]interface{})
+		wishes, _ := obj["wishes"].([]interface{})
+		if len(wishes) != 1 {
+			t.Fatalf("hide_claimers=%v: wishes = %v, want one", hideClaimers, wishes)
+		}
+		if claims, _ := wishes[0].(map[string]interface{})["wishclaim"].([]interface{}); len(claims) != 0 {
+			t.Errorf("hide_claimers=%v: public wish carries claims %v", hideClaimers, claims)
+		}
+		if raw, _ := json.Marshal(resp); strings.Contains(string(raw), claimant.ID.String()) {
+			t.Errorf("hide_claimers=%v: the claimer's ID is in the public response", hideClaimers)
+		}
+	}
+}
+
 // A real database error while building the wishlist object is a 500; only a
 // missing wishlist or owner (TestGetWishlistOwnerDisabled) is a 400.
 func TestGetWishlistObjectDBFailure(t *testing.T) {
