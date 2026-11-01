@@ -153,6 +153,8 @@ Images being decoded share a budget of twice that amount, so decoding takes at m
 
 In a container with a memory limit, also set the `GOMEMLIMIT` environment variable a little below that limit, for example `GOMEMLIMIT=900MiB` for a 1 GiB limit, which is enough at the default `max_image_pixels`. Go then collects garbage harder as memory use nears that amount, rather than letting the container be killed for running out of memory. It cannot free memory that is still in use, so it complements a suitable limit rather than replacing it.
 
+Pønskelisten's access log, on its standard output, leaves out query strings and the codes some URLs carry: password reset and e-mail verification codes, and public wishlist links. Your proxy's access log, if you keep one, may record whole URLs, so reset links: keep it as private as the app's data.
+
 ### Security headers
 
 Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` (links to shops never carry a public wishlist link or a reset code in their `Referer`), and `X-Frame-Options: DENY`, so no other site can frame Pønskelisten, for instance to trick a click on the consent page. Embedding it in a dashboard iframe isn't possible as a result.
