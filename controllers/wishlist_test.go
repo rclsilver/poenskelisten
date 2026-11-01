@@ -2289,6 +2289,46 @@ func TestGetPublicWishlistCarriesNoClaims(t *testing.T) {
 	}
 }
 
+// The public link shows the list, its wishes and the owner's name, and no
+// one else: not the groups it is shared with, nor collaborators, nor any
+// user ID or e-mail address.
+func TestGetPublicWishlistShowsOnlyTheOwnersName(t *testing.T) {
+	setupControllersDB(t)
+	owner, member, collaborator := createTestUser(t), createTestUser(t), createTestUser(t)
+	wishlist := wishlistTestPublic(t, owner.ID)
+	group := createTestGroup(t, owner.ID)
+	addGroupMembership(t, group.ID, owner.ID)
+	addGroupMembership(t, group.ID, member.ID)
+	addWishlistMembership(t, wishlist.ID, group.ID)
+	addWishCollaborator(t, wishlist.ID, collaborator.ID)
+	createTestWish(t, collaborator.ID, wishlist.ID)
+
+	code, resp := wlDo(GetPublicWishlist, "GET", "/api/open/wishlists/public/"+wishlist.PublicHash.String(), "", "",
+		gin.Params{{Key: "wishlist_hash", Value: wishlist.PublicHash.String()}})
+	if code != 200 {
+		t.Fatalf("status = %d, want 200; body=%v", code, resp)
+	}
+	obj, _ := resp["wishlist"].(map[string]interface{})
+	if members, _ := obj["members"].([]interface{}); len(members) != 0 {
+		t.Errorf("members = %v, want none", members)
+	}
+	if collaborators, _ := obj["collaborators"].([]interface{}); len(collaborators) != 0 {
+		t.Errorf("collaborators = %v, want none", collaborators)
+	}
+	if ownerObj, _ := obj["owner"].(map[string]interface{}); ownerObj["first_name"] != owner.FirstName {
+		t.Errorf("owner = %v, want the owner's name", ownerObj)
+	}
+	if wishes, _ := obj["wishes"].([]interface{}); len(wishes) != 1 {
+		t.Errorf("wishes = %v, want the one wish", wishes)
+	}
+	raw, _ := json.Marshal(resp)
+	for _, user := range []models.User{owner, member, collaborator} {
+		if strings.Contains(string(raw), user.ID.String()) || strings.Contains(string(raw), *user.Email) {
+			t.Errorf("the public response names user %s", user.ID)
+		}
+	}
+}
+
 // A real database error while building the wishlist object is a 500; only a
 // missing wishlist or owner (TestGetWishlistOwnerDisabled) is a 400.
 func TestGetWishlistObjectDBFailure(t *testing.T) {
