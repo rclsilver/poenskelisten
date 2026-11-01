@@ -6,6 +6,7 @@ import (
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/models"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func setupMCPConfig(t *testing.T) {
@@ -111,6 +113,7 @@ func TestRequireScope(t *testing.T) {
 		{"no token info", context.Background(), "not authenticated"},
 		{"missing scope", contextWithTokenInfo(t, &mcpauth.TokenInfo{UserID: userID.String(), Scopes: []string{scopeGroupsRead}, Expiration: expiry}), "missing required scope"},
 		{"subject not a UUID", contextWithTokenInfo(t, &mcpauth.TokenInfo{UserID: "not-a-uuid", Scopes: []string{scopeWishlistsRead}, Expiration: expiry}), "invalid token subject"},
+		{"nil subject", contextWithTokenInfo(t, &mcpauth.TokenInfo{UserID: uuid.Nil.String(), Scopes: []string{scopeWishlistsRead}, Expiration: expiry}), "invalid token subject"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -200,4 +203,101 @@ func TestToolsSurfaceDatabaseFailures(t *testing.T) {
 			t.Errorf("listGroups = (%v, %v), want 'failed to load groups'", res, err)
 		}
 	})
+}
+
+// snapshotMCPTables dumps every row of the tables the tools touch, so a test
+// can check that nothing at all was written.
+func snapshotMCPTables(t *testing.T) string {
+	t.Helper()
+	var dump strings.Builder
+	for _, table := range []string{"users", "wishlists", "wishes", "groups", "group_memberships", "wishlist_memberships", "wishlist_collaborators", "wish_claims", "wish_categories"} {
+		rows := []map[string]interface{}{}
+		if err := database.Instance.Table(table).Order("id").Find(&rows).Error; err != nil {
+			t.Fatalf("failed to read %s: %v", table, err)
+		}
+		fmt.Fprintf(&dump, "%s: %v\n", table, rows)
+	}
+	return dump.String()
+}
+
+// The nil UUID once made every lookup match whatever record came first, so a
+// caller owning one wishlist could read and change everyone's. Every tool
+// must refuse it, whichever argument carries it, and change nothing.
+func TestToolsRefuseNilID(t *testing.T) {
+	setupMCPDB(t)
+	nilID := uuid.Nil.String()
+
+	caller := createMCPTestUser(t, "Erin")
+	callerWishlist := createMCPWishlist(t, caller, "Caller list", false)
+	createMCPWish(t, caller, callerWishlist, "Caller wish")
+	callerGroup := shareWithGroup(t, callerWishlist.ID, caller.ID)
+
+	victim := createMCPTestUser(t, "Victim")
+	claimer := createMCPTestUser(t, "Claimer")
+	victimWishlist := createMCPWishlist(t, victim, "Victim list", false)
+	victimWish := createMCPWish(t, victim, victimWishlist, "Victim wish")
+	createMCPClaim(t, claimer, victimWish)
+	createMCPCollaborator(t, claimer, victimWishlist)
+	victimGroup := shareWithGroup(t, victimWishlist.ID, victim.ID, claimer.ID)
+	publicWishlist := createMCPWishlist(t, victim, "Victim public list", false)
+	if r := database.Instance.Model(&publicWishlist).Updates(map[string]interface{}{"public": true, "claimable": false, "public_hash": uuid.NewString()}); r.Error != nil {
+		t.Fatalf("failed to publish wishlist: %v", r.Error)
+	}
+
+	before := snapshotMCPTables(t)
+	scopes := strings.Join([]string{scopeWishlistsRead, scopeGroupsRead, scopeWishlistsWrite, scopeWishesClaim}, " ")
+	session := startMCPTestServer(t, caller.ID, scopes)
+
+	cases := []struct {
+		tool string
+		args map[string]any
+	}{
+		{"list_wishes", map[string]any{"wishlist_id": nilID}},
+		{"get_public_wishlist", map[string]any{"public_hash": nilID}},
+		{"list_group_members", map[string]any{"group_id": nilID}},
+		{"get_wishlist_sharing", map[string]any{"wishlist_id": nilID}},
+		{"attach_wishlist_to_group", map[string]any{"wishlist_id": nilID, "group_id": callerGroup.ID.String()}},
+		{"attach_wishlist_to_group", map[string]any{"wishlist_id": callerWishlist.ID.String(), "group_id": nilID}},
+		{"detach_wishlist_from_group", map[string]any{"wishlist_id": nilID, "group_id": victimGroup.ID.String()}},
+		{"detach_wishlist_from_group", map[string]any{"wishlist_id": callerWishlist.ID.String(), "group_id": nilID}},
+		{"add_collaborator", map[string]any{"wishlist_id": nilID, "user_id": caller.ID.String()}},
+		{"add_collaborator", map[string]any{"wishlist_id": callerWishlist.ID.String(), "user_id": nilID}},
+		{"remove_collaborator", map[string]any{"wishlist_id": nilID, "user_id": claimer.ID.String()}},
+		{"remove_collaborator", map[string]any{"wishlist_id": callerWishlist.ID.String(), "user_id": nilID}},
+		{"create_wishlist", map[string]any{"name": "Nil group list", "group_ids": []string{nilID}}},
+		{"update_wishlist", map[string]any{"wishlist_id": nilID, "name": "Renamed list"}},
+		{"delete_wishlist", map[string]any{"wishlist_id": nilID}},
+		{"create_wish", map[string]any{"wishlist_id": nilID, "name": "Nil wish name"}},
+		{"update_wish", map[string]any{"wish_id": nilID, "name": "Renamed wish"}},
+		{"delete_wish", map[string]any{"wish_id": nilID}},
+		{"claim_wish", map[string]any{"wish_id": nilID}},
+		{"unclaim_wish", map[string]any{"wish_id": nilID}},
+	}
+	for _, c := range cases {
+		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: c.tool, Arguments: c.args})
+		if err != nil {
+			t.Fatalf("%s %v: transport error %v", c.tool, c.args, err)
+		}
+		text := firstText(t, result)
+		if !result.IsError {
+			t.Errorf("%s %v succeeded with %s, want an error", c.tool, c.args, text)
+		}
+		for _, secret := range []string{"Victim", "Claimer", victimWishlist.ID.String(), publicWishlist.ID.String()} {
+			if strings.Contains(text, secret) {
+				t.Errorf("%s %v leaked %q: %s", c.tool, c.args, secret, text)
+			}
+		}
+	}
+
+	nilSession := startMCPTestServer(t, uuid.Nil, scopes)
+	for _, tool := range []string{"list_wishlists", "list_groups"} {
+		result, err := nilSession.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: tool, Arguments: map[string]any{}})
+		if err == nil && !result.IsError {
+			t.Errorf("%s with a token for the nil UUID succeeded with %s, want an error", tool, firstText(t, result))
+		}
+	}
+
+	if after := snapshotMCPTables(t); after != before {
+		t.Errorf("tools called with the nil UUID changed the database:\nbefore %s\nafter  %s", before, after)
+	}
 }
