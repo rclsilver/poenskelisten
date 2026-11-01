@@ -1541,6 +1541,29 @@ func TestInitRouterLogsNoCodes(t *testing.T) {
 	}
 }
 
+// A client sending or reading slowly mustn't keep its connection open for as
+// long as it likes, but the largest image request must still have time to
+// upload over a slow line.
+func TestNewServerBoundsSlowClients(t *testing.T) {
+	server := newServer(":8080", http.NotFoundHandler())
+	if server.Addr != ":8080" || server.Handler == nil {
+		t.Fatalf("server = %+v, want it on :8080 with the handler", server)
+	}
+	if server.ReadHeaderTimeout <= 0 || server.ReadHeaderTimeout > 30*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want a few seconds", server.ReadHeaderTimeout)
+	}
+	slowestUpload := time.Duration(middlewares.ImageUploadMaxBodyBytes*8/700_000) * time.Second
+	if server.ReadTimeout < slowestUpload || server.ReadTimeout > 5*time.Minute {
+		t.Errorf("ReadTimeout = %v, want between %v and 5m", server.ReadTimeout, slowestUpload)
+	}
+	if server.WriteTimeout <= server.ReadTimeout || server.WriteTimeout > 5*time.Minute {
+		t.Errorf("WriteTimeout = %v, want longer than ReadTimeout (%v), at most 5m", server.WriteTimeout, server.ReadTimeout)
+	}
+	if server.IdleTimeout <= 0 || server.IdleTimeout > 5*time.Minute {
+		t.Errorf("IdleTimeout = %v, want a few minutes", server.IdleTimeout)
+	}
+}
+
 // A page of another site can make a visitor's browser post the attacker's
 // password to the sign-in endpoint, the JSON in a text/plain body so no
 // preflight stops it, and leave the visitor signed in to the attacker's
