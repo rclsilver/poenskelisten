@@ -281,7 +281,7 @@ func updateWishlist(ctx context.Context, _ *mcp.CallToolRequest, args updateWish
 		wishlist.Public = ptrTo(*args.Public)
 	}
 
-	if *wishlist.Public && *wishlist.Claimable {
+	if wishlist.Public != nil && *wishlist.Public && wishlist.Claimable != nil && *wishlist.Claimable {
 		return nil, nil, userError("A wishlist cannot have claimable wishes and be public to users without accounts.")
 	}
 
