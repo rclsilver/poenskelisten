@@ -24,6 +24,7 @@ func SetUserPendingMFASecret(userID uuid.UUID, encryptedSecret string) error {
 			"mfa_secret":      encryptedSecret,
 			"mfa_enabled":     false,
 			"mfa_enrolled_at": nil,
+			"mfa_last_step":   nil,
 		})
 
 	if record.Error != nil {
@@ -66,6 +67,7 @@ func DisableUserMFA(userID uuid.UUID) error {
 			"mfa_secret":      nil,
 			"mfa_enabled":     false,
 			"mfa_enrolled_at": nil,
+			"mfa_last_step":   nil,
 		})
 	if record.Error != nil {
 		return record.Error
@@ -161,4 +163,18 @@ func GetUserMFAEnrollmentState(userID uuid.UUID) (enabled bool, isLocal bool, er
 		return false, false, errors.New("failed to find correct user in DB")
 	}
 	return user.IsMFAEnabled(), user.IsLocalAuth(), nil
+}
+
+// UseTOTPStep records that the user's TOTP code for step was accepted, and
+// reports false when that step, or a later one, was already used: each code
+// works once, even when sent twice at the same time.
+func UseTOTPStep(userID uuid.UUID, step int64) (bool, error) {
+	record := Instance.
+		Model(&models.User{}).
+		Where("id = ? AND (mfa_last_step IS NULL OR mfa_last_step < ?)", userID, step).
+		Update("mfa_last_step", step)
+	if record.Error != nil {
+		return false, record.Error
+	}
+	return record.RowsAffected == 1, nil
 }

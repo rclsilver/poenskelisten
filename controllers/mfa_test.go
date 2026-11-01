@@ -160,7 +160,12 @@ func mfaTestUserWithPassword(t *testing.T, plaintext string) models.User {
 
 func totpCodeFor(t *testing.T, secret string) string {
 	t.Helper()
-	code, err := totp.GenerateCode(secret, time.Now())
+	return totpCodeAt(t, secret, time.Now())
+}
+
+func totpCodeAt(t *testing.T, secret string, at time.Time) string {
+	t.Helper()
+	code, err := totp.GenerateCode(secret, at)
 	if err != nil {
 		t.Fatalf("failed to generate TOTP code: %v", err)
 	}
@@ -280,7 +285,9 @@ func activateTestUser(t *testing.T, userID uuid.UUID) (secret string, recoveryCo
 	config.ConfigFile.MFARecoveryCodesEnabled = true
 	secret = enrollTestUser(t, userID)
 
-	body := `{"code":"` + totpCodeFor(t, secret) + `"}`
+	// Activation uses up its code: take the previous step, still accepted, and
+	// leave the current one to the test.
+	body := `{"code":"` + totpCodeAt(t, secret, time.Now().Add(-30*time.Second)) + `"}`
 	code, parsed := runJSONHandler(APIActivateMFA, "POST", "/api/mfa/activate", body, map[string]string{
 		"Authorization": authHeader(t, userID, false),
 	}, nil)
@@ -787,11 +794,13 @@ func TestActivateMFADatabaseFailures(t *testing.T) {
 	cases := []struct {
 		name      string
 		op, table string
+		skip      int
 		wantError string
 	}{
-		{"clear old recovery codes", "delete", "mfa_recovery_codes", "Failed to store recovery codes."},
-		{"store recovery codes", "create", "mfa_recovery_codes", "Failed to store recovery codes."},
-		{"activate user", "update", "users", "Failed to enable MFA."},
+		{"record the code", "update", "users", 0, "Failed to verify code."},
+		{"clear old recovery codes", "delete", "mfa_recovery_codes", 0, "Failed to store recovery codes."},
+		{"store recovery codes", "create", "mfa_recovery_codes", 0, "Failed to store recovery codes."},
+		{"activate user", "update", "users", 1, "Failed to enable MFA."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -802,7 +811,7 @@ func TestActivateMFADatabaseFailures(t *testing.T) {
 			user := createTestUser(t)
 			secret := enrollTestUser(t, user.ID)
 			header := map[string]string{"Authorization": authHeader(t, user.ID, false)}
-			failDBOperation(t, c.op, c.table, 0)
+			failDBOperation(t, c.op, c.table, c.skip)
 
 			body := `{"code":"` + totpCodeFor(t, secret) + `"}`
 			code, parsed := runJSONHandler(APIActivateMFA, "POST", "/api/mfa/activate", body, header, nil)
@@ -842,7 +851,8 @@ func TestDisableMFAPersistFails(t *testing.T) {
 	user := mfaTestUserWithPassword(t, "correct horse battery staple")
 	secret, _ := activateTestUser(t, user.ID)
 	header := map[string]string{"Authorization": authHeader(t, user.ID, false)}
-	failDBOperation(t, "update", "users", 0)
+	// The first update of users records the TOTP code.
+	failDBOperation(t, "update", "users", 1)
 
 	body := `{"password":"correct horse battery staple","code":"` + totpCodeFor(t, secret) + `"}`
 	code, parsed := runJSONHandler(APIDisableMFA, "POST", "/api/mfa/disable", body, header, nil)
@@ -876,6 +886,39 @@ func postValidateMFA(t *testing.T, userID models.User, code string) int {
 	body := `{"mfa_token":"` + challenge + `","code":"` + code + `"}`
 	status, _ := runJSONHandler(APIValidateMFA, "POST", "/api/open/tokens/mfa", body, nil, nil)
 	return status
+}
+
+// A TOTP code works once: seen over someone's shoulder or replayed from a
+// recorded request, it can't sign in again, through a new challenge or to
+// turn MFA off, and neither can an older one. The code that turned MFA on
+// is used up too.
+func TestTOTPCodesWorkOnce(t *testing.T) {
+	setupControllersDB(t)
+	enableTOTPEncryption(t)
+	user := mfaTestUserWithPassword(t, "correct horse battery staple")
+	secret := enrollTestUser(t, user.ID)
+	activation := totpCodeAt(t, secret, time.Now().Add(-30*time.Second))
+	if code, parsed := runJSONHandler(APIActivateMFA, "POST", "/api/mfa/activate", `{"code":"`+activation+`"}`, map[string]string{"Authorization": authHeader(t, user.ID, false)}, nil); code != 200 {
+		t.Fatalf("activation = %d %v, want 200", code, parsed)
+	}
+
+	if code := postValidateMFA(t, user, activation); code != 401 {
+		t.Errorf("the activation code signed in: status = %d, want 401", code)
+	}
+	current := totpCodeFor(t, secret)
+	if code := postValidateMFA(t, user, current); code != 200 {
+		t.Fatalf("first use = %d, want 200", code)
+	}
+	if code := postValidateMFA(t, user, current); code != 401 {
+		t.Errorf("replayed code = %d, want 401", code)
+	}
+	body := `{"password":"correct horse battery staple","code":"` + current + `"}`
+	if code, parsed := runJSONHandler(APIDisableMFA, "POST", "/api/mfa/disable", body, map[string]string{"Authorization": authHeader(t, user.ID, false)}, nil); code != 400 {
+		t.Errorf("replayed code turned MFA off: status = %d; body=%v", code, parsed)
+	}
+	if code := postValidateMFA(t, user, totpCodeAt(t, secret, time.Now().Add(30*time.Second))); code != 200 {
+		t.Errorf("the next code = %d, want 200", code)
+	}
 }
 
 // A fresh challenge token (a new password login) doesn't give a new budget:

@@ -9,6 +9,7 @@ import (
 	"aunefyren/poenskelisten/models"
 	"aunefyren/poenskelisten/utilities"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -38,7 +39,11 @@ func verifySecondFactor(user models.User, code string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		return utilities.ValidateTOTPCode(secret, code), nil
+		step, valid := utilities.TOTPStep(secret, code, time.Now())
+		if !valid {
+			return false, nil
+		}
+		return database.UseTOTPStep(user.ID, step)
 	}
 
 	// Recovery-code path: only available when the administrator has enabled
@@ -162,7 +167,18 @@ func APIActivateMFA(context *gin.Context) {
 		return
 	}
 
-	if !utilities.ValidateTOTPCode(secret, request.Code) {
+	// The code that turns MFA on is used up too, so it can't sign in next.
+	step, valid := utilities.TOTPStep(secret, request.Code, time.Now())
+	if valid {
+		valid, err = database.UseTOTPStep(userID, step)
+		if err != nil {
+			logger.Log.Error("Failed to record the TOTP code. Error: " + err.Error())
+			context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify code."})
+			context.Abort()
+			return
+		}
+	}
+	if !valid {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Invalid code. Please try again."})
 		context.Abort()
 		return

@@ -92,6 +92,34 @@ func TestRecoveryCodeStoreConsumeAndClear(t *testing.T) {
 	}
 }
 
+// A TOTP step is accepted once, and never after a later one; a new secret
+// or turning MFA off starts over.
+func TestUseTOTPStep(t *testing.T) {
+	setupTestDB(t)
+	user := createTestUser(t)
+
+	for _, c := range []struct {
+		step int64
+		want bool
+	}{{100, true}, {100, false}, {99, false}, {101, true}} {
+		if used, err := UseTOTPStep(user.ID, c.step); err != nil || used != c.want {
+			t.Errorf("step %d: used = %v (err %v), want %v", c.step, used, err, c.want)
+		}
+	}
+	if err := SetUserPendingMFASecret(user.ID, "new-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if used, err := UseTOTPStep(user.ID, 50); err != nil || !used {
+		t.Errorf("after a new secret: used = %v (err %v), want true", used, err)
+	}
+	if err := DisableUserMFA(user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if used, err := UseTOTPStep(user.ID, 10); err != nil || !used {
+		t.Errorf("after disabling: used = %v (err %v), want true", used, err)
+	}
+}
+
 func TestDisableUserMFAClearsState(t *testing.T) {
 	setupTestDB(t)
 	user := createTestUser(t)
