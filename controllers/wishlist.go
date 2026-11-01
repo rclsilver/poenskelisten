@@ -1101,6 +1101,26 @@ func ConvertWishlistToWishlistObject(wishlist models.Wishlist, RequestUserID *uu
 
 	groupObjects := ConvertGroupsToGroupObjects(groups)
 
+	// Who is in a group is for its members only, as GetGroup and
+	// GetGroupMembers have it. The list may be shared with groups the viewer
+	// isn't in: of those, only the name is kept.
+	viewerGroups := map[uuid.UUID]bool{}
+	if RequestUserID != nil {
+		mine, err := database.GetGroupsAUserIsAMemberOf(*RequestUserID)
+		if err != nil {
+			return models.WishlistUser{}, err
+		}
+		for _, group := range mine {
+			viewerGroups[group.ID] = true
+		}
+	}
+	for i := range groupObjects {
+		if !viewerGroups[groupObjects[i].ID] {
+			groupObjects[i].Owner = models.User{}
+			groupObjects[i].Members = []models.User{}
+		}
+	}
+
 	wishlistsCollabs, err := database.GetWishlistCollaboratorsFromWishlist(wishlist.ID)
 	if err != nil {
 		logger.Log.Error("Failed to convert wishlist collaborators. Returning. Error: " + err.Error())

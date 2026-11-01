@@ -227,6 +227,50 @@ func TestGetWishlistAsGroupMember(t *testing.T) {
 	}
 }
 
+// A list shared with two groups shows a member of one of them who is in the
+// other only by its name, as GetGroup and GetGroupMembers would refuse it.
+func TestGetWishlistHidesTheMembersOfOtherGroups(t *testing.T) {
+	setupControllersDB(t)
+	owner, viewer, outsider := createTestUser(t), createTestUser(t), createTestUser(t)
+	wishlist := createTestWishlist(t, owner.ID)
+	mine := createTestGroup(t, owner.ID)
+	other := createTestGroup(t, owner.ID)
+	for _, membership := range []struct{ group, member uuid.UUID }{
+		{mine.ID, owner.ID}, {mine.ID, viewer.ID}, {other.ID, owner.ID}, {other.ID, outsider.ID},
+	} {
+		addGroupMembership(t, membership.group, membership.member)
+	}
+	addWishlistMembership(t, wishlist.ID, mine.ID)
+	addWishlistMembership(t, wishlist.ID, other.ID)
+
+	code, resp := wlDo(GetWishlist, "GET", "/api/auth/wishlists/"+wishlist.ID.String(), "", authHeader(t, viewer.ID, false),
+		gin.Params{{Key: "wishlist_id", Value: wishlist.ID.String()}})
+	if code != 200 {
+		t.Fatalf("status = %d, want 200; body=%v", code, resp)
+	}
+	groups, _ := resp["wishlist"].(map[string]interface{})["members"].([]interface{})
+	if len(groups) != 2 {
+		t.Fatalf("groups = %v, want both", groups)
+	}
+	for _, raw := range groups {
+		group := raw.(map[string]interface{})
+		members, _ := group["members"].([]interface{})
+		switch group["id"] {
+		case mine.ID.String():
+			if len(members) != 2 {
+				t.Errorf("own group members = %v, want two", members)
+			}
+		case other.ID.String():
+			if len(members) != 0 || group["name"] != other.Name {
+				t.Errorf("other group = %v, want its name and no members", group)
+			}
+		}
+	}
+	if raw, _ := json.Marshal(resp); strings.Contains(string(raw), outsider.ID.String()) {
+		t.Error("the response names a member of a group the viewer isn't in")
+	}
+}
+
 func TestGetWishlistForbidden(t *testing.T) {
 	setupControllersDB(t)
 	owner := createTestUser(t)
