@@ -855,8 +855,8 @@ func TestGetUsersIncludeDisabledIgnoredForNonAdmin(t *testing.T) {
 func TestGetUsersNotACollaboratorOfWishlist(t *testing.T) {
 	setupControllersDB(t)
 	requester := createTestUser(t)
-	owner := createTestUser(t)
-	wishlist := createTestWishlist(t, owner.ID)
+	createTestUser(t)
+	wishlist := createTestWishlist(t, requester.ID)
 
 	header := map[string]string{"Authorization": authHeader(t, requester.ID, false)}
 	code, resp, _ := doRequest(GetUsers, "GET", "/api/auth/users?notACollaboratorOfWishlistID="+wishlist.ID.String(), "", header, nil)
@@ -884,14 +884,30 @@ func TestGetUsersNotACollaboratorBadWishlistID(t *testing.T) {
 	}
 }
 
-func TestGetUsersNotACollaboratorUnknownWishlist(t *testing.T) {
+// The filters tell who is in a group or edits a wishlist, so they are only
+// for the group's members and the wishlist's owner. Anyone else, and anyone
+// naming a group or wishlist that doesn't exist, gets the same refusal.
+func TestGetUsersFiltersRequireAccess(t *testing.T) {
 	setupControllersDB(t)
 	requester := createTestUser(t)
+	owner := createTestUser(t)
+	group := createTestGroup(t, owner.ID)
+	addGroupMembership(t, group.ID, owner.ID)
+	wishlist := createTestWishlist(t, owner.ID)
+	addWishlistMembership(t, wishlist.ID, group.ID)
+	addWishCollaborator(t, wishlist.ID, requester.ID)
 
 	header := map[string]string{"Authorization": authHeader(t, requester.ID, false)}
-	code, resp, _ := doRequest(GetUsers, "GET", "/api/auth/users?notACollaboratorOfWishlistID="+uuid.NewString(), "", header, nil)
-	if code != 400 {
-		t.Fatalf("status = %d, want 400; body=%v", code, resp)
+	for _, query := range []string{
+		"notAMemberOfGroupID=" + group.ID.String(),
+		"notAMemberOfGroupID=" + uuid.NewString(),
+		"notACollaboratorOfWishlistID=" + wishlist.ID.String(),
+		"notACollaboratorOfWishlistID=" + uuid.NewString(),
+	} {
+		code, resp, _ := doRequest(GetUsers, "GET", "/api/auth/users?"+query, "", header, nil)
+		if code != 403 || resp["users"] != nil {
+			t.Errorf("%s: status = %d, want 403 and no users; body=%v", query, code, resp)
+		}
 	}
 }
 
@@ -900,7 +916,8 @@ func TestGetUsersNotACollaboratorWishlistLookupFailure(t *testing.T) {
 	requester := createTestUser(t)
 	wishlist := createTestWishlist(t, requester.ID)
 	header := map[string]string{"Authorization": authHeader(t, requester.ID, false)}
-	failDBOperation(t, "query", "wishlists", 0)
+	// The first query on wishlists is the ownership check.
+	failDBOperation(t, "query", "wishlists", 1)
 
 	code, resp, _ := doRequest(GetUsers, "GET", "/api/auth/users?notACollaboratorOfWishlistID="+wishlist.ID.String(), "", header, nil)
 	if code != 500 {
@@ -1415,8 +1432,10 @@ func TestGetUsersNotAMemberOfGroupMembershipLookupFailure(t *testing.T) {
 	setupControllersDB(t)
 	user := createTestUser(t)
 	group := createTestGroup(t, user.ID)
+	addGroupMembership(t, group.ID, user.ID)
 	header := map[string]string{"Authorization": authHeader(t, user.ID, false)}
-	failDBOperation(t, "query", "group_memberships", 0)
+	// The first query on group_memberships is the caller's own membership.
+	failDBOperation(t, "query", "group_memberships", 1)
 
 	code, resp, _ := doRequest(GetUsers, "GET", "/api/auth/users?notAMemberOfGroupID="+group.ID.String(), "", header, nil)
 	if code != 500 {
@@ -1430,8 +1449,8 @@ func TestGetUsersNotAMemberOfGroupMembershipLookupFailure(t *testing.T) {
 func TestGetUsersNotACollaboratorWishlistConversionFailure(t *testing.T) {
 	setupControllersDB(t)
 	requester := createTestUser(t)
-	owner := createTestUser(t)
-	wishlist := createTestWishlist(t, owner.ID)
+	createTestUser(t)
+	wishlist := createTestWishlist(t, requester.ID)
 	header := map[string]string{"Authorization": authHeader(t, requester.ID, false)}
 	failDBOperation(t, "query", "wishlist_collaborators", 0)
 
@@ -1447,9 +1466,9 @@ func TestGetUsersNotACollaboratorWishlistConversionFailure(t *testing.T) {
 func TestGetUsersNotACollaboratorExcludesCollaborators(t *testing.T) {
 	setupControllersDB(t)
 	requester := createTestUser(t)
-	owner := createTestUser(t)
+	createTestUser(t)
 	collaborator := createTestUser(t)
-	wishlist := createTestWishlist(t, owner.ID)
+	wishlist := createTestWishlist(t, requester.ID)
 
 	collab := models.WishlistCollaborator{UserID: collaborator.ID, WishlistID: wishlist.ID, Enabled: true}
 	collab.ID = uuid.New()
