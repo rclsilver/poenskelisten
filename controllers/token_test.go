@@ -243,6 +243,31 @@ func TestGenerateTokenLocksAccountAfterFailures(t *testing.T) {
 	}
 }
 
+// Each spelling of an address has a lock budget of its own, and only the
+// account's own address may sign in to it: under MySQL's default collations
+// the lookup also finds an account from its address written with other
+// accents, which would otherwise multiply the guesses. SQLite's lookup stays
+// exact on accents, so this checks the budgets, not that lookup.
+func TestGenerateTokenCountsFailuresUnderTheTypedAddress(t *testing.T) {
+	setupControllersDB(t)
+	enablePrivateKey(t)
+	limitSignInAttempts(t, 3)
+	user := createTestUserWithPassword(t, "Correct-Passw0rd")
+	variant := "é" + (*user.Email)[1:]
+
+	for i := 0; i < 3; i++ {
+		if code, _ := postGenerateToken(`{"email":"` + variant + `","password":"wrong"}`); code != 401 {
+			t.Fatalf("attempt %d = %d, want 401", i+1, code)
+		}
+	}
+	if code, _ := postGenerateToken(`{"email":"` + variant + `","password":"Correct-Passw0rd"}`); code != 429 {
+		t.Errorf("the typed spelling once locked = %d, want 429", code)
+	}
+	if code, _ := postGenerateToken(`{"email":"` + *user.Email + `","password":"Correct-Passw0rd"}`); code != 200 {
+		t.Errorf("the account's own address = %d, want 200: failures under another spelling must not lock it", code)
+	}
+}
+
 // An e-mail without an account locks exactly like a real one, so the lock
 // itself doesn't reveal which addresses exist.
 func TestGenerateTokenUnknownEmailLocksTheSameWay(t *testing.T) {
