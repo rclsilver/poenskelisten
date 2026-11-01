@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"aunefyren/poenskelisten/config"
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/models"
 	"encoding/json"
@@ -1813,10 +1814,10 @@ func TestDeleteWish_InjectedFailures(t *testing.T) {
 		return wishTestReq{handler: DeleteWish, method: "DELETE", path: "/api/wishes/" + wish.ID.String(), params: gin.Params{{Key: "wish_id", Value: wish.ID.String()}}, userID: owner.ID}
 	}
 	wishTestRunFailures(t, []wishTestFailCase{
-		// ConvertWishToWishObject makes the first collaborator and wishlist
-		// queries; the handler's own checks are the second.
-		{name: "collaborator check", fixture: fixture, op: "query", table: "wishlist_collaborators", skip: 1, want: 500, wantErr: "Failed to verify wishlist collaborator status."},
-		{name: "ownership check", fixture: fixture, op: "query", table: "wishlists", skip: 1, want: 500, wantErr: "Failed to verify ownership of wishlist."},
+		// The handler's own checks are the first collaborator and wishlist
+		// queries.
+		{name: "collaborator check", fixture: fixture, op: "query", table: "wishlist_collaborators", skip: 0, want: 500, wantErr: "Failed to verify wishlist collaborator status."},
+		{name: "ownership check", fixture: fixture, op: "query", table: "wishlists", skip: 0, want: 500, wantErr: "Failed to verify ownership of wishlist."},
 		{name: "disable wish", fixture: fixture, op: "update", table: "wishes", want: 500, wantErr: "Failed to delete wish."},
 		{name: "list wishes", fixture: fixture, op: "query", table: "wishes", skip: 1, want: 500, wantErr: "Failed to get wishes from database."},
 	})
@@ -1857,37 +1858,83 @@ func TestDeleteWish_ReturnsRemainingWishesNewestFirst(t *testing.T) {
 	}
 }
 
-// The claimant notification runs after the response is written, so its
-// failures are only logged: the delete must still succeed.
-func TestDeleteWish_ClaimNotificationFailuresAreNotFatal(t *testing.T) {
+// Claimers are notified once the delete has answered, and the notification
+// starts whether or not the wish was claimed, so the time a delete takes
+// can't tell the owner or a collaborator which wishes were claimed.
+func TestDeleteWish_NotifiesClaimersAfterAnsweringWhateverTheClaims(t *testing.T) {
+	setupControllersDB(t)
+	restoreConfig(t)
+	config.ConfigFile.SMTPEnabled = true
+	owner, claimant, wishlist, claimed := claimSetup(t)
+	free := createTestWish(t, owner.ID, wishlist.ID)
+	wishTestSeedClaim(t, claimed.ID, claimant.ID)
+
+	started := make(chan uuid.UUID, 2)
+	release := make(chan struct{})
+	original := deletedWishNotifier
+	t.Cleanup(func() { deletedWishNotifier = original })
+	deletedWishNotifier = func(wish models.Wish) {
+		started <- wish.ID
+		<-release
+	}
+	defer close(release)
+
+	header := authHeader(t, owner.ID, false)
+	for _, wish := range []models.Wish{free, claimed} {
+		w := wishTestSend(t, wishTestReq{handler: DeleteWish, method: "DELETE", params: gin.Params{{Key: "wish_id", Value: wish.ID.String()}}}, header)
+		if w.Code != 201 {
+			t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+		}
+		select {
+		case id := <-started:
+			if id != wish.ID {
+				t.Errorf("notified wish %s, want %s", id, wish.ID)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no notification started for %s", wish.Name)
+		}
+	}
+}
+
+// Only the claimer of a deleted wish is e-mailed, hidden claimers included.
+func TestNotifyDeletedWishClaimersEmailsTheClaimer(t *testing.T) {
+	setupControllersDB(t)
+	srv := startFakeSMTPServer(t)
+	configureTestSMTP(t, srv)
+	owner, claimant, wishlist, claimed := claimSetup(t)
+	wishlistTestSave(t, wishlist, func(w *models.Wishlist) { w.HideClaimers = boolPtr(true) })
+	free := createTestWish(t, owner.ID, wishlist.ID)
+	wishTestSeedClaim(t, claimed.ID, claimant.ID)
+
+	notifyDeletedWishClaimers(free)
+	if got := srv.messageCount(); got != 0 {
+		t.Errorf("a free wish sent %d e-mails, want none", got)
+	}
+	notifyDeletedWishClaimers(claimed)
+	if got := srv.messageCount(); got != 1 {
+		t.Errorf("a claimed wish sent %d e-mails, want one to its claimer", got)
+	}
+}
+
+// The notification runs on its own after the answer, so its failures are
+// only logged.
+func TestNotifyDeletedWishClaimersFailuresAreNotFatal(t *testing.T) {
 	cases := []struct {
 		name  string
 		op    string
 		table string
-		skip  int
 	}{
-		// wishlists: ConvertWishToWishObject, ownership check, then GetWishlist.
-		{name: "wishlist lookup", op: "query", table: "wishlists", skip: 2},
-		{name: "wishlist conversion", op: "query", table: "groups", skip: 0},
-		// users: wish owner, claimant, wishlist owner, the wishlist
-		// conversion's owner lookup, then the claimant's full record.
-		{name: "claimant lookup", op: "query", table: "users", skip: 4},
+		{name: "claims lookup", op: "query", table: "wish_claims"},
+		{name: "wishlist lookup", op: "query", table: "wishlists"},
+		{name: "claimant lookup", op: "query", table: "users"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			setupControllersDB(t)
-			owner, claimant, _, wish := claimSetup(t)
+			_, claimant, _, wish := claimSetup(t)
 			wishTestSeedClaim(t, wish.ID, claimant.ID)
-			header := authHeader(t, owner.ID, false)
-			failDBOperation(t, c.op, c.table, c.skip)
-
-			w := wishTestSend(t, wishTestReq{handler: DeleteWish, method: "DELETE", params: gin.Params{{Key: "wish_id", Value: wish.ID.String()}}}, header)
-			if w.Code != 201 {
-				t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
-			}
-			if msg := parseWishBody(t, w)["message"]; msg != "Wish deleted." {
-				t.Errorf("message = %v, want %q", msg, "Wish deleted.")
-			}
+			failDBOperation(t, c.op, c.table, 0)
+			notifyDeletedWishClaimers(wish)
 		})
 	}
 }
