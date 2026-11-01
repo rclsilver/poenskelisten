@@ -14,6 +14,7 @@ type ConfigStruct struct {
 	PoenskelistenPort           int    `json:"poenskelisten_port"`
 	PoenskelistenName           string `json:"poenskelisten_name"`
 	PoenskelistenDescription    string `json:"poenskelisten_description"`
+	DefaultLanguage             string `json:"default_language"`
 	PoenskelistenExternalURL    string `json:"poenskelisten_external_url"`
 	PoenskelistenAdditionalURLs string `json:"poenskelisten_additional_urls"`
 	PoenskelistenTrustedProxies string `json:"poenskelisten_trusted_proxies"`

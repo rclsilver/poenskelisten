@@ -92,6 +92,7 @@ You can configure Pønskelisten in **three different ways**:
 | poenskelisten_test_email | testemail | testemail | string | E-mail destination when in `test` |
 | poenskelisten_name | name | name | string | Display name of the app |
 | poenskelisten_description | description | description | string | Description of the app |
+| default_language | defaultlanguage | defaultlanguage | string | Language the pages show in until a user picks one in the display menu: `en` or `fr`, even in a browser set to the other language. Default `auto`: each browser's language when it is English or French, otherwise English |
 | poenskelisten_log_level | loglevel | loglevel | string | How detailed the logs are. `info`, `debug` or `trace`
 | timezone | timezone | timezone | string | E.g. `Europe/Oslo` |
 | `N/A` | generateinvite | generateinvite | bool | Generate an invite code on startup. Do `generateinvite true` |

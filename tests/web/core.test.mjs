@@ -14,6 +14,37 @@ test("detectLang prefers the saved choice, then the browser, then English", () =
     assert.equal(P.detectLang(null, []), "en");
 });
 
+test("detectLang puts the instance's default language before the browser's, never before the user's choice", () => {
+    const { P } = loadCore();
+    assert.equal(P.detectLang(null, ["en-US", "en"], "fr"), "fr");
+    assert.equal(P.detectLang("en", ["en-US"], "fr"), "en");
+    assert.equal(P.detectLang(null, ["de-DE"], "fr"), "fr");
+    assert.equal(P.detectLang(null, ["fr-FR"], ""), "fr");
+    assert.equal(P.detectLang(null, ["en-US"], "xx"), "en");
+});
+
+test("defaultLang reads the instance's default language from the page", () => {
+    assert.equal(loadCore({ defaultLanguage: "fr" }).P.defaultLang(), "fr");
+    assert.equal(loadCore({ defaultLanguage: "" }).P.defaultLang(), "");
+    assert.equal(loadCore().P.defaultLang(), "");
+});
+
+test("loadI18n loads the instance's default language for an English browser with no choice saved", () => {
+    const requested = [];
+    const fetch = (url) => {
+        requested.push(url);
+        return new Promise(() => {});
+    };
+    loadCore({ defaultLanguage: "fr", languages: ["en-US", "en"], globals: { fetch } }).P.loadI18n();
+    assert.deepEqual(requested, ["/json/lang-fr.json"]);
+
+    requested.length = 0;
+    const storage = memoryStorage();
+    loadCore({ defaultLanguage: "fr", languages: ["en-US"], storage, globals: { fetch } }).P.prefs.set("lang", "en");
+    loadCore({ defaultLanguage: "fr", languages: ["en-US"], storage, globals: { fetch } }).P.loadI18n();
+    assert.deepEqual(requested, ["/json/lang-en.json"]);
+});
+
 test("t fills placeholders and the application name, and shows unknown keys as is", () => {
     const { P } = loadCore({ appName: "Nos envies" });
     P.setDictionary("fr", { "login.withProvider": "Se connecter avec {provider}", "register.title": "Rejoignez {app}." });

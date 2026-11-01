@@ -194,11 +194,14 @@ export function loadCore(options = {}) {
 
 export function loadScripts(files, options = {}) {
     const document = new FakeDocument();
-    if (options.appName !== undefined) {
-        const meta = document.createElement("meta");
-        meta.setAttribute("name", "application-name");
-        meta.setAttribute("content", options.appName);
-        document.head.appendChild(meta);
+    const metas = { "application-name": options.appName, "default-language": options.defaultLanguage };
+    for (const [name, content] of Object.entries(metas)) {
+        if (content !== undefined) {
+            const meta = document.createElement("meta");
+            meta.setAttribute("name", name);
+            meta.setAttribute("content", content);
+            document.head.appendChild(meta);
+        }
     }
     const sandbox = {
         document,
