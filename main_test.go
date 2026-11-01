@@ -3,13 +3,19 @@ package main
 import (
 	"aunefyren/poenskelisten/auth"
 	"aunefyren/poenskelisten/config"
+	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/logger"
 	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
+	"bytes"
+	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	textTemplate "text/template"
@@ -26,6 +33,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sirupsen/logrus"
 	logrusTest "github.com/sirupsen/logrus/hooks/test"
 	"golang.org/x/crypto/bcrypt"
@@ -918,6 +926,134 @@ func TestInitRouterRateLimitsUploadsPerAccount(t *testing.T) {
 	}
 	if code := send("Bob", "/api/auth/wishes?wishlist="+lists["Bob"].ID.String(), `{"name":"First gift"}`); code != http.StatusCreated {
 		t.Errorf("Bob from the same address = %d, want 201 with his own budget", code)
+	}
+}
+
+// bearerTransport adds an access token to every request it sends.
+type bearerTransport struct{ token string }
+
+func (b bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	request = request.Clone(request.Context())
+	request.Header.Set("Authorization", "Bearer "+b.token)
+	return http.DefaultTransport.RoundTrip(request)
+}
+
+// mcpSession connects to the router's /mcp as userID with the given scopes.
+func mcpSession(t *testing.T, router *gin.Engine, userID uuid.UUID, scopes string) *sdkmcp.ClientSession {
+	t.Helper()
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+	token, err := auth.GenerateOAuthAccessToken(userID, "mcp-client", config.MCPResource(), scopes, false, true)
+	if err != nil {
+		t.Fatalf("failed to sign MCP token: %v", err)
+	}
+	transport := &sdkmcp.StreamableClientTransport{Endpoint: server.URL + "/mcp", HTTPClient: &http.Client{Transport: bearerTransport{token}}}
+	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil).Connect(context.Background(), transport, nil)
+	if err != nil {
+		t.Fatalf("failed to connect to /mcp: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	return session
+}
+
+// An image sent through MCP is an upload like one from the web app: both
+// count against the account's one rate_limit_upload budget, and MCP calls
+// without an image don't.
+func TestInitRouterCountsMCPImagesInTheUploadBudget(t *testing.T) {
+	_, token := setupRouterTest(t)
+	config.ConfigFile.RateLimitUpload = "3/1m"
+	config.ConfigFile.MCPEnabled = true
+	t.Cleanup(controllers.UseWishImageDir(t.TempDir()))
+	router := initRouter(config.ConfigFile)
+
+	user := createRouterUser(t, "Alice", false)
+	now := time.Now()
+	list := models.Wishlist{Name: "Alice list", Enabled: true, OwnerID: user.ID, Date: &now}
+	list.ID = uuid.New()
+	createRouterRecord(t, &list)
+	wish := models.Wish{Name: "Headphones", Enabled: true, OwnerID: user.ID, WishlistID: list.ID}
+	wish.ID = uuid.New()
+	createRouterRecord(t, &wish)
+
+	var picture bytes.Buffer
+	if err := png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(picture.Bytes())
+
+	webWishes := 0
+	createOnWeb := func() int {
+		webWishes++
+		body := `{"name":"Web gift ` + strconv.Itoa(webWishes) + `"}`
+		request := httptest.NewRequest(http.MethodPost, "/api/auth/wishes?wishlist="+list.ID.String(), strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", token(user.ID, false))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, request)
+		return w.Code
+	}
+	session := mcpSession(t, router, user.ID, "mcp:wishlists.read mcp:wishlists.write")
+	updateOnMCP := func(args map[string]any) string {
+		args["wish_id"] = wish.ID.String()
+		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "update_wish", Arguments: args})
+		if err != nil {
+			t.Fatalf("update_wish failed: %v", err)
+		}
+		if !result.IsError {
+			return ""
+		}
+		return result.Content[0].(*sdkmcp.TextContent).Text
+	}
+
+	if a, b := createOnWeb(), createOnWeb(); a != http.StatusCreated || b != http.StatusCreated {
+		t.Fatalf("web uploads = %d %d, want 201 201", a, b)
+	}
+	if refusal := updateOnMCP(map[string]any{"image": dataURI}); refusal != "" {
+		t.Fatalf("third upload, through MCP, refused: %s", refusal)
+	}
+	if refusal := updateOnMCP(map[string]any{"image": dataURI}); refusal != middlewares.TooManyUploads {
+		t.Errorf("fourth upload, through MCP = %q, want %q", refusal, middlewares.TooManyUploads)
+	}
+	if code := createOnWeb(); code != http.StatusTooManyRequests {
+		t.Errorf("fifth upload, on the web = %d, want 429", code)
+	}
+	if refusal := updateOnMCP(map[string]any{"name": "Wireless headphones"}); refusal != "" {
+		t.Errorf("an MCP edit without an image was refused: %s", refusal)
+	}
+}
+
+// Only a request with a valid MCP token may send /mcp a body large enough for
+// an image; any other is held to the usual limit before anything reads it.
+func TestInitRouterLimitsMCPBodiesWithoutAToken(t *testing.T) {
+	_, token := setupRouterTest(t)
+	config.ConfigFile.MCPEnabled = true
+	router := initRouter(config.ConfigFile)
+	user := createRouterUser(t, "Alice", false)
+	mcpToken, err := auth.GenerateOAuthAccessToken(user.ID, "mcp-client", config.MCPResource(), "mcp:wishlists.read", false, true)
+	if err != nil {
+		t.Fatalf("failed to sign MCP token: %v", err)
+	}
+
+	body := strings.Repeat("x", int(middlewares.DefaultMaxBodyBytes)+1)
+	post := func(authorization string) int {
+		request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		if authorization != "" {
+			request.Header.Set("Authorization", authorization)
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, request)
+		return w.Code
+	}
+
+	for name, authorization := range map[string]string{"no token": "", "a forged token": "Bearer not-a-token", "a web API token": token(user.ID, false)} {
+		if code := post(authorization); code != http.StatusRequestEntityTooLarge {
+			t.Errorf("%s: status = %d, want 413", name, code)
+		}
+	}
+	if code := post("Bearer " + mcpToken); code == http.StatusRequestEntityTooLarge {
+		t.Error("a valid MCP token: the body was refused as too large")
 	}
 }
 

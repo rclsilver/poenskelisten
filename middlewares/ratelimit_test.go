@@ -247,7 +247,7 @@ func TestUploadRateLimitCountsPerAccount(t *testing.T) {
 	t.Cleanup(func() { logger.Log = original })
 	logger.Log, _ = logrusTest.NewNullLogger()
 
-	handler := UploadRateLimit(1, time.Minute)
+	handler := NewUploadBudget(1, time.Minute).Limit()
 	send := func(token string) *httptest.ResponseRecorder {
 		ctx, w := rateLimitTestContext("203.0.113.1:12345")
 		if token != "" {
@@ -275,6 +275,38 @@ func TestUploadRateLimitCountsPerAccount(t *testing.T) {
 	}
 	if w := send(""); w.Code != http.StatusOK {
 		t.Errorf("a request without a token = %d, want it counted by address", w.Code)
+	}
+}
+
+// An image sent through MCP counts against the same budget as the web
+// routes, for the same account only.
+func TestUploadBudgetIsSharedByWebAndMCP(t *testing.T) {
+	setupMiddlewareConfig(t)
+	original := logger.Log
+	t.Cleanup(func() { logger.Log = original })
+	logger.Log, _ = logrusTest.NewNullLogger()
+
+	budget := NewUploadBudget(2, time.Minute)
+	alice, bob := uuid.New(), uuid.New()
+	ctx, w := rateLimitTestContext("203.0.113.1:12345")
+	ctx.Request.Header.Set("Authorization", "Bearer "+apiTokenForUser(t, alice, false))
+	budget.Limit()(ctx)
+	if ctx.IsAborted() {
+		t.Fatalf("first web upload refused with %d", w.Code)
+	}
+	if !budget.Allow(alice, "update_wish") {
+		t.Fatal("first MCP upload refused within the budget")
+	}
+	if budget.Allow(alice, "update_wish") {
+		t.Error("a third upload from web and MCP together was allowed")
+	}
+	if !budget.Allow(bob, "update_wish") {
+		t.Error("another account shares Alice's budget")
+	}
+
+	var off *UploadBudget
+	if !off.Allow(alice, "update_wish") || NewUploadBudget(0, time.Minute) != nil {
+		t.Error("a budget turned off must allow everything")
 	}
 }
 

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
+	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
 	"context"
 	"errors"
@@ -18,6 +19,25 @@ import (
 // errNoWish is the wish counterpart of errNoAccess: the same answer whether
 // the wish doesn't exist or isn't the caller's to touch.
 var errNoWish = userError("wish not found or not accessible")
+
+// wishWriter runs the wish tools. A tool call carrying an image counts
+// against the same per-account budget as the web routes that take one.
+type wishWriter struct {
+	uploads *middlewares.UploadBudget
+}
+
+// decodeImage counts an image against the caller's upload budget, then
+// checks it; a refused upload is never decoded.
+func (w wishWriter) decodeImage(userID uuid.UUID, tool string, dataURI string) (image.Image, error) {
+	if !w.uploads.Allow(userID, tool) {
+		return nil, userError(middlewares.TooManyUploads)
+	}
+	decoded, err := controllers.DecodeImageUpload(dataURI)
+	if err != nil {
+		return nil, userError(err.Error())
+	}
+	return decoded, nil
+}
 
 type createWishArgs struct {
 	WishlistID   string   `json:"wishlist_id" jsonschema:"the ID of the wishlist to add the wish to (from list_wishlists); you must own it or collaborate on it"`
@@ -65,20 +85,21 @@ func newWishWriteOut(w models.Wish) wishWriteOut {
 	return out
 }
 
-func registerWishWriteTools(server *mcp.Server) {
+func registerWishWriteTools(server *mcp.Server, uploads *middlewares.UploadBudget) {
+	writer := wishWriter{uploads: uploads}
 	no, yes := false, true
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_wish",
 		Description: "Add a wish to a wishlist you own or collaborate on. Names must be unique within the wishlist. A picture can be given as a base64 data URI. Returns the new wish.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &no},
-	}, createWish)
+	}, writer.createWish)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_wish",
 		Description: "Edit a wish on a wishlist you own or collaborate on. Only the fields you provide change; image sets or replaces the picture and image_delete removes it. Returns the updated wish.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &yes, IdempotentHint: true},
-	}, updateWish)
+	}, writer.updateWish)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete_wish",
@@ -106,7 +127,7 @@ func writableWish(userID, wishID uuid.UUID) (models.Wish, error) {
 	return *wish, nil
 }
 
-func createWish(ctx context.Context, _ *mcp.CallToolRequest, args createWishArgs) (*mcp.CallToolResult, any, error) {
+func (w wishWriter) createWish(ctx context.Context, _ *mcp.CallToolRequest, args createWishArgs) (*mcp.CallToolResult, any, error) {
 	userID, err := requireScope(ctx, scopeWishlistsWrite)
 	if err != nil {
 		return nil, nil, err
@@ -142,9 +163,9 @@ func createWish(ctx context.Context, _ *mcp.CallToolRequest, args createWishArgs
 	// behind.
 	var wishImage image.Image
 	if args.Image != "" {
-		wishImage, err = controllers.DecodeImageUpload(args.Image)
+		wishImage, err = w.decodeImage(userID, "create_wish", args.Image)
 		if err != nil {
-			return nil, nil, userError(err.Error())
+			return nil, nil, err
 		}
 	}
 
@@ -179,7 +200,7 @@ func createWish(ctx context.Context, _ *mcp.CallToolRequest, args createWishArgs
 	return jsonResult(newWishWriteOut(created)), nil, nil
 }
 
-func updateWish(ctx context.Context, _ *mcp.CallToolRequest, args updateWishArgs) (*mcp.CallToolResult, any, error) {
+func (w wishWriter) updateWish(ctx context.Context, _ *mcp.CallToolRequest, args updateWishArgs) (*mcp.CallToolResult, any, error) {
 	userID, err := requireScope(ctx, scopeWishlistsWrite)
 	if err != nil {
 		return nil, nil, err
@@ -199,9 +220,9 @@ func updateWish(ctx context.Context, _ *mcp.CallToolRequest, args updateWishArgs
 		if args.ImageDelete {
 			return nil, nil, userError("Give either image or image_delete, not both.")
 		}
-		wishImage, err = controllers.DecodeImageUpload(*args.Image)
+		wishImage, err = w.decodeImage(userID, "update_wish", *args.Image)
 		if err != nil {
-			return nil, nil, userError(err.Error())
+			return nil, nil, err
 		}
 	}
 

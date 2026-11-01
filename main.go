@@ -192,12 +192,13 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	router.Use(middlewares.WarnUntrustedForwardedFor())
 	router.Use(middlewares.SecurityHeaders())
 
-	// Routes whose JSON body can carry a base64 image get a raised limit.
-	router.Use(middlewares.MaxBodySize(middlewares.DefaultMaxBodyBytes, map[string]int64{
-		"/api/auth/wishes":          middlewares.ImageUploadMaxBodyBytes,
-		"/api/auth/wishes/:wish_id": middlewares.ImageUploadMaxBodyBytes,
-		"/api/auth/users/update":    middlewares.ImageUploadMaxBodyBytes,
-		"/mcp":                      middlewares.ImageUploadMaxBodyBytes,
+	// Routes whose JSON body can carry a base64 image get a raised limit;
+	// /mcp only for a request with a valid token.
+	router.Use(middlewares.MaxBodySize(middlewares.DefaultMaxBodyBytes, map[string]middlewares.BodyLimit{
+		"/api/auth/wishes":          middlewares.Fixed(middlewares.ImageUploadMaxBodyBytes),
+		"/api/auth/wishes/:wish_id": middlewares.Fixed(middlewares.ImageUploadMaxBodyBytes),
+		"/api/auth/users/update":    middlewares.Fixed(middlewares.ImageUploadMaxBodyBytes),
+		"/mcp":                      mcpserver.MaxBodyBytes,
 	}))
 
 	// Every endpoint that checks a password or a one-time code (or e-mails
@@ -210,9 +211,11 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	registerRateLimit := config.RegisterRateLimit(configFile)
 	// Failed passwords and codes are also counted per account, from any address.
 	controllers.SetSignInAttemptLimit(config.AccountRateLimit(configFile))
-	// The routes that can carry an image share a budget per account.
+	// The routes that can carry an image share a budget per account, with the
+	// MCP tools that take one.
 	uploadRateLimit := config.UploadRateLimit(configFile)
-	uploadLimit := middlewares.UploadRateLimit(uploadRateLimit.Max, uploadRateLimit.Window)
+	uploads := middlewares.NewUploadBudget(uploadRateLimit.Max, uploadRateLimit.Window)
+	uploadLimit := uploads.Limit()
 	// What turns a password, a code or the sign-in cookie into a session or
 	// a consent only takes requests from Pønskelisten's own pages.
 	sameOrigin := middlewares.SameOrigin()
@@ -422,7 +425,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	router.POST("/oauth/register", middlewares.RateLimit(registerRateLimit.Max, registerRateLimit.Window), controllers.APIOAuthRegister)
 
 	// MCP resource server (self-gates on MCPEnabled; OAuth-protected).
-	router.Any("/mcp", mcpserver.Handler())
+	router.Any("/mcp", mcpserver.Handler(uploads))
 
 	return router
 }
@@ -556,7 +559,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 	var rateLimitOAuth = flag.String("ratelimitoauth", configFile.RateLimitOAuth, "Requests per client address to the OAuth authorize, consent, token and revoke endpoints, e.g. 60/1m, or off. Default "+config.DefaultOAuthRateLimit+".")
 	var rateLimitRegister = flag.String("ratelimitregister", configFile.RateLimitRegister, "OAuth client registrations per client address, e.g. 10/1h, or off. Default "+config.DefaultRegisterRateLimit+".")
 	var rateLimitAccount = flag.String("ratelimitaccount", configFile.RateLimitAccount, "Failed sign-in attempts per account (wrong passwords per e-mail, wrong codes per user) before it is locked for the rest of the window, e.g. 10/15m, or off. Default "+config.DefaultAccountRateLimit+".")
-	var rateLimitUpload = flag.String("ratelimitupload", configFile.RateLimitUpload, "Requests per account to the routes that can carry an image (creating or editing a wish, updating one's account), e.g. 30/10m, or off. Default "+config.DefaultUploadRateLimit+".")
+	var rateLimitUpload = flag.String("ratelimitupload", configFile.RateLimitUpload, "Requests per account that can carry an image (creating or editing a wish, updating one's account, and MCP calls with an image), e.g. 30/10m, or off. Default "+config.DefaultUploadRateLimit+".")
 
 	// Generate invite
 	var generateInvite = flag.String("generateinvite", "false", "If an invite code should be automatically generate on startup.")

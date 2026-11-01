@@ -11,13 +11,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// bodyLimitRouter has a default limit of 10 bytes, raised to 20 on /large.
+// bodyLimitRouter has a default limit of 10 bytes, raised to 20 on /large,
+// and on /signed only for a request with an X-Signed header.
 // Its handler echoes how many body bytes it could read, or 400 if reading hit
 // the limit.
 func bodyLimitRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(MaxBodySize(10, map[string]int64{"/large/:id": 20}))
+	router.Use(MaxBodySize(10, map[string]BodyLimit{
+		"/large/:id": Fixed(20),
+		"/signed": func(request *http.Request) int64 {
+			if request.Header.Get("X-Signed") != "" {
+				return 20
+			}
+			return 10
+		},
+	}))
 	handler := func(context *gin.Context) {
 		if context.Request.Body == nil {
 			context.String(http.StatusOK, "0")
@@ -32,6 +41,7 @@ func bodyLimitRouter() *gin.Engine {
 	}
 	router.POST("/", handler)
 	router.POST("/large/:id", handler)
+	router.POST("/signed", handler)
 	return router
 }
 
@@ -77,5 +87,21 @@ func TestMaxBodySizeNoBody(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != 200 {
 		t.Errorf("status = %d, want 200 for a request with no body", recorder.Code)
+	}
+}
+
+// A route's limit can depend on the request, such as whether it carries a
+// valid token.
+func TestMaxBodySizePerRequest(t *testing.T) {
+	for signed, want := range map[bool]int{false: 413, true: 200} {
+		request := httptest.NewRequest("POST", "/signed", bytes.NewReader(bytes.Repeat([]byte("x"), 15)))
+		if signed {
+			request.Header.Set("X-Signed", "yes")
+		}
+		recorder := httptest.NewRecorder()
+		bodyLimitRouter().ServeHTTP(recorder, request)
+		if recorder.Code != want {
+			t.Errorf("signed %v: status = %d, want %d", signed, recorder.Code, want)
+		}
 	}
 }

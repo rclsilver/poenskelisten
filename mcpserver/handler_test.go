@@ -5,6 +5,7 @@ import (
 	"aunefyren/poenskelisten/config"
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/logger"
+	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
 	"context"
 	"database/sql"
@@ -78,11 +79,18 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // client session ready to call tools.
 func startMCPTestServer(t *testing.T, userID uuid.UUID, scope string) *sdkmcp.ClientSession {
 	t.Helper()
+	return startMCPTestServerWithUploads(t, userID, scope, nil)
+}
+
+// startMCPTestServerWithUploads is startMCPTestServer with the tools that take
+// an image counting it in uploads.
+func startMCPTestServerWithUploads(t *testing.T, userID uuid.UUID, scope string, uploads *middlewares.UploadBudget) *sdkmcp.ClientSession {
+	t.Helper()
 	setupMCPConfig(t)
 	config.ConfigFile.MCPEnabled = true
 
 	router := gin.New()
-	router.Any("/mcp", Handler())
+	router.Any("/mcp", Handler(uploads))
 	httpServer := httptest.NewServer(router)
 	t.Cleanup(httpServer.Close)
 
@@ -111,7 +119,7 @@ func TestHandlerDisabledReturns404(t *testing.T) {
 	w := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(w)
 	ctx.Request = httptest.NewRequest("POST", "/mcp", nil)
-	Handler()(ctx)
+	Handler(nil)(ctx)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 when MCP is disabled", w.Code)
@@ -123,7 +131,7 @@ func TestHandlerRejectsMissingBearerToken(t *testing.T) {
 	config.ConfigFile.MCPEnabled = true
 
 	router := gin.New()
-	router.Any("/mcp", Handler())
+	router.Any("/mcp", Handler(nil))
 	httpServer := httptest.NewServer(router)
 	defer httpServer.Close()
 
@@ -329,7 +337,7 @@ func createMCPTestUser(t *testing.T, firstName string) models.User {
 // server, and the app, running.
 func TestPanickingToolLeavesTheServerRunning(t *testing.T) {
 	ctx := context.Background()
-	server := buildServer()
+	server := buildServer(nil)
 	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "panics"}, func(context.Context, *sdkmcp.CallToolRequest, noArgs) (*sdkmcp.CallToolResult, any, error) {
 		panic("boom")
 	})
@@ -355,7 +363,7 @@ func TestPanickingToolLeavesTheServerRunning(t *testing.T) {
 }
 
 func TestBuildServerRegistersTools(t *testing.T) {
-	server := buildServer()
+	server := buildServer(nil)
 	if server == nil {
 		t.Fatal("buildServer returned nil")
 	}

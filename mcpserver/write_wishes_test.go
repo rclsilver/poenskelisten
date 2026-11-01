@@ -2,18 +2,22 @@ package mcpserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"image"
 	"image/png"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
+	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
 
 	"github.com/google/uuid"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func createWritableWish(t *testing.T, wishlist models.Wishlist, author uuid.UUID, name string) models.Wish {
@@ -301,5 +305,43 @@ func TestWishImageTools(t *testing.T) {
 	database.Instance.Model(&models.Wish{}).Where("name = ?", "Keyboard").Count(&count)
 	if count != 0 {
 		t.Errorf("a wish was created with a refused image")
+	}
+}
+
+// An image over the account's upload budget is refused before it is decoded
+// or anything is written; a wish without one still goes through.
+func TestWishImageToolsCountAgainstTheUploadBudget(t *testing.T) {
+	setupMCPDB(t)
+	t.Cleanup(controllers.UseWishImageDir(filepath.Join(t.TempDir(), "wishes")))
+	owner := createMCPTestUser(t, "Ada")
+	wishlist := createWritableWishlist(t, owner.ID, "Birthday")
+	id := wishlist.ID.String()
+	session := startMCPTestServerWithUploads(t, owner.ID, writeScopes, middlewares.NewUploadBudget(1, time.Minute))
+	create := func(name, picture string) *sdkmcp.CallToolResult {
+		args := map[string]any{"wishlist_id": id, "name": name}
+		if picture != "" {
+			args["image"] = picture
+		}
+		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "create_wish", Arguments: args})
+		if err != nil {
+			t.Fatalf("create_wish failed: %v", err)
+		}
+		return result
+	}
+
+	if result := create("Headphones", wishImageDataURI(t)); result.IsError {
+		t.Fatalf("first image refused: %s", firstText(t, result))
+	}
+	result := create("Keyboard", wishImageDataURI(t))
+	if !result.IsError || firstText(t, result) != middlewares.TooManyUploads {
+		t.Errorf("second image = %+v, want %q", result.Content, middlewares.TooManyUploads)
+	}
+	var count int64
+	database.Instance.Model(&models.Wish{}).Where("name = ?", "Keyboard").Count(&count)
+	if count != 0 {
+		t.Error("a wish was created with an image over the budget")
+	}
+	if result := create("Mouse pad", ""); result.IsError {
+		t.Errorf("a wish without an image was refused: %s", firstText(t, result))
 	}
 }

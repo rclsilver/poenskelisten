@@ -16,20 +16,28 @@ const (
 	ImageUploadMaxBodyBytes int64 = 15 << 20
 )
 
+// A BodyLimit gives how many body bytes a request to a route may send.
+type BodyLimit func(*http.Request) int64
+
+// Fixed is a BodyLimit that is the same for every request.
+func Fixed(limit int64) BodyLimit {
+	return func(*http.Request) int64 { return limit }
+}
+
 // MaxBodySize caps request bodies at defaultLimit, or at overrides[route] for
 // routes (keyed by their registered path, e.g. "/api/auth/wishes/:wish_id")
-// that need more. Without it, handlers' ShouldBindJSON buffers whatever the
-// client sends before any size check runs.
+// that need more, possibly only for some requests. Without it, handlers'
+// ShouldBindJSON buffers whatever the client sends before any size check runs.
 //
 // It has to be a single global middleware with an override table, rather than
 // a global default plus per-route middleware: the global one runs first, and
 // would reject a large upload before the route's middleware could raise the
 // limit.
-func MaxBodySize(defaultLimit int64, overrides map[string]int64) gin.HandlerFunc {
+func MaxBodySize(defaultLimit int64, overrides map[string]BodyLimit) gin.HandlerFunc {
 	return func(context *gin.Context) {
 		limit := defaultLimit
 		if override, ok := overrides[context.FullPath()]; ok {
-			limit = override
+			limit = override(context.Request)
 		}
 
 		// Reject a declared oversize body up front, with a clear status. The
