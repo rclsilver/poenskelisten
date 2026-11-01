@@ -579,13 +579,25 @@ func UpdateUser(context *gin.Context) {
 	// Local accounts must confirm their current password. OIDC-only accounts have
 	// no local password; they are already authenticated via their session token.
 	if user.HasPassword() {
+		// With a stolen session this is another place to guess the password
+		// from, so it shares the login's budget for the account. Not the
+		// second factor's: the right password would reset it.
+		attemptKey := emailAttemptKey(*user.Email)
+		if locked, retryAfter := signInAttempts.Blocked(attemptKey); locked {
+			middlewares.RefuseLockedAttempt(context, retryAfter)
+			return
+		}
 		credentialError := user.CheckPassword(userUpdateRequest.PasswordOriginal)
 		if credentialError != nil {
 			logger.Log.Error("Invalid credentials.")
+			if signInAttempts.Failed(attemptKey) {
+				logger.Log.Warn("Too many failed passwords for user " + userID.String() + "; password checks for it are locked for a while.")
+			}
 			context.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials."})
 			context.Abort()
 			return
 		}
+		signInAttempts.Succeeded(attemptKey)
 	}
 
 	// Make sure password match
