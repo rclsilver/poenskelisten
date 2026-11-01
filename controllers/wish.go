@@ -786,7 +786,11 @@ func RegisterWishClaim(context *gin.Context) {
 
 	// Create wish claim
 	_, err = database.CreateWishClaimInDB(db_wishclaim)
-	if err != nil {
+	if errors.Is(err, database.ErrWishAlreadyClaimed) {
+		context.JSON(http.StatusBadRequest, gin.H{"error": "Wish is already claimed."})
+		context.Abort()
+		return
+	} else if err != nil {
 		logger.Log.Error("Failed to create claim. Error: " + err.Error())
 		context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create claim."})
 		context.Abort()

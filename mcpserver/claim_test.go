@@ -8,6 +8,7 @@ import (
 	"aunefyren/poenskelisten/models"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const claimScopes = "mcp:wishlists.read mcp:wishes.claim"
@@ -169,5 +170,40 @@ func TestClaimedByHiddenWhenClaimersHidden(t *testing.T) {
 	callTool(t, carol.ID, "list_wishes", map[string]any{"wishlist_id": wishlist.ID.String()}, &listed)
 	if len(listed) != 1 || listed[0].Claimed == nil || !*listed[0].Claimed || listed[0].ClaimedBy == "Bob" {
 		t.Errorf("hide_claimers not respected: %+v", listed)
+	}
+}
+
+// Two claims sent at once both found the wish free and were both stored. Here
+// a rival's claim is committed between this call's check and its insert.
+func TestClaimWishLosingARaceIsAlreadyClaimed(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	bob := createMCPTestUser(t, "Bob")
+	carol := createMCPTestUser(t, "Carol")
+	wishlist := createWritableWishlist(t, owner.ID, "Birthday")
+	shareWithGroup(t, wishlist.ID, owner.ID, bob.ID, carol.ID)
+	wish := createWritableWish(t, wishlist, owner.ID, "Headphones")
+
+	raced := false
+	err := database.Instance.Callback().Create().Before("gorm:begin_transaction").Register("test:rival-claim", func(db *gorm.DB) {
+		if raced || db.Statement.Table != "wish_claims" {
+			return
+		}
+		raced = true
+		rival := models.WishClaim{WishID: wish.ID, UserID: carol.ID, Enabled: true}
+		rival.ID = uuid.New()
+		if err := db.Session(&gorm.Session{NewDB: true}).Create(&rival).Error; err != nil {
+			t.Errorf("failed to store the rival claim: %v", err)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if msg := claimErr(t, bob.ID, "claim_wish", wish.ID.String()); msg != "Wish is already claimed." {
+		t.Errorf("error = %q, want 'Wish is already claimed.'", msg)
+	}
+	if n := claimCount(t, wish.ID); n != 1 {
+		t.Errorf("claims = %d, want only the rival's", n)
 	}
 }

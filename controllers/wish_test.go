@@ -1275,6 +1275,49 @@ func TestRegisterWishClaim_OwnerRefusedWhateverTheClaim(t *testing.T) {
 	}
 }
 
+// Two claims sent at once both found the wish free and were both stored. Here
+// a rival's claim lands between this request's check and its insert.
+func TestRegisterWishClaim_LosingARaceIsAlreadyClaimed(t *testing.T) {
+	setupControllersDB(t)
+	_, claimant, wishlist, wish := claimSetup(t)
+	rival := createTestUser(t)
+	group := createTestGroup(t, rival.ID)
+	addGroupMembership(t, group.ID, rival.ID)
+	addWishlistMembership(t, wishlist.ID, group.ID)
+	// Hooked before the insert's own transaction, so the rival claim is
+	// committed on its own, as it would be from another request.
+	raced := false
+	err := database.Instance.Callback().Create().Before("gorm:begin_transaction").Register("test:rival-claim", func(db *gorm.DB) {
+		if raced || db.Statement.Table != "wish_claims" {
+			return
+		}
+		raced = true
+		rivalClaim := models.WishClaim{WishID: wish.ID, UserID: rival.ID, Enabled: true}
+		rivalClaim.ID = uuid.New()
+		if err := db.Session(&gorm.Session{NewDB: true}).Create(&rivalClaim).Error; err != nil {
+			t.Errorf("failed to store the rival claim: %v", err)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w, ctx := wishCtx("POST", "/api/wishes/"+wish.ID.String()+"/claim", `{}`)
+	ctx.Params = gin.Params{{Key: "wish_id", Value: wish.ID.String()}}
+	ctx.Request.Header.Set("Authorization", authHeader(t, claimant.ID, false))
+	RegisterWishClaim(ctx)
+	if w.Code != 400 || parseWishBody(t, w)["error"] != "Wish is already claimed." {
+		t.Fatalf("status = %d, want 400 'Wish is already claimed.'; body=%s", w.Code, w.Body.String())
+	}
+	var live []models.WishClaim
+	if err := database.Instance.Where("wish_id = ? AND enabled = ?", wish.ID, true).Find(&live).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 || live[0].UserID != rival.ID {
+		t.Errorf("live claims = %+v, want only the rival's", live)
+	}
+}
+
 func TestRegisterWishClaim_DanglingWishlistID(t *testing.T) {
 	// A wish whose WishlistID points at no real wishlist row (GetWishlistIDFromWish,
 	// which only needs the Wish table, succeeds; GetWishlistByWishlistID then

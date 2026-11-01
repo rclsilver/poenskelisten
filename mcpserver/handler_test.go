@@ -49,6 +49,9 @@ func setupMCPDB(t *testing.T) {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	database.Instance = instance
+	if err := database.EnsureOneClaimPerWish(); err != nil {
+		t.Fatalf("failed to add the claim index: %v", err)
+	}
 }
 
 // bearerRoundTripper injects a fixed Authorization header into every request,
