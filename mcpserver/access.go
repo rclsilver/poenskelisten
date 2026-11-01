@@ -102,10 +102,10 @@ func accessibleWishlists(userID uuid.UUID) ([]roledWishlist, error) {
 }
 
 // claimsVisible reports whether the caller may learn whether a wish is
-// claimed. Owners and collaborators must never see it (it would spoil the
-// surprise), nor the wish's own author; controllers.ConvertWishToWishObject
-// enforces the same rule on the data, this keeps the output from implying
-// "unclaimed" when the information was merely withheld.
+// claimed: only group members, and not on their own wish. Owners and
+// collaborators must never see it (it would spoil the surprise), nor someone
+// reading a public link. Withholding the field rather than answering "not
+// claimed" keeps the output from implying a wish is free.
 func claimsVisible(r role, wishOwnerID, userID uuid.UUID) bool {
-	return r != roleOwner && r != roleCollaborator && wishOwnerID != userID
+	return r == roleGroupMember && wishOwnerID != userID
 }
