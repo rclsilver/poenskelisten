@@ -160,6 +160,12 @@ func Migrate() {
 		logger.Log.Error("failed to make the database refuse a second claim on a wish. error: " + err.Error())
 	}
 
+	// Without it two claims sent at once can both be stored, but nothing else
+	// depends on it, so a failure is reported rather than stopping startup.
+	if err := EnsureOneClaimPerWish(); err != nil {
+		logger.Log.Error("failed to make the database refuse a second claim on a wish. error: " + err.Error())
+	}
+
 	logger.Log.Debug("database migration completed")
 }
 

@@ -101,7 +101,9 @@ func claimWish(ctx context.Context, _ *mcp.CallToolRequest, args claimArgs) (*mc
 
 	claim := models.WishClaim{UserID: userID, WishID: wishID}
 	claim.ID = uuid.New()
-	if _, err := database.CreateWishClaimInDB(claim); err != nil {
+	if _, err := database.CreateWishClaimInDB(claim); errors.Is(err, database.ErrWishAlreadyClaimed) {
+		return nil, nil, userError("Wish is already claimed.")
+	} else if err != nil {
 		return nil, nil, errors.New("failed to claim the wish")
 	}
 	return jsonResult(claimOut{ID: wishID.String(), Claimed: true}), nil, nil
