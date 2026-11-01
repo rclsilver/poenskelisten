@@ -6,6 +6,7 @@ import (
 	"aunefyren/poenskelisten/models"
 	"context"
 	"errors"
+	"image"
 	"math"
 	"net/url"
 	"strings"
@@ -25,6 +26,7 @@ type createWishArgs struct {
 	URL          string   `json:"url,omitempty" jsonschema:"optional http(s) link to the item"`
 	Price        *float64 `json:"price,omitempty" jsonschema:"optional price, zero or more"`
 	CategoryName string   `json:"category_name,omitempty" jsonschema:"optional category: an existing one of the wishlist is reused by name, otherwise it is created"`
+	Image        string   `json:"image,omitempty" jsonschema:"optional picture as a base64 data URI (data:image/jpeg;base64,... or data:image/png;base64,...), at most 10 MB decoded"`
 }
 
 type updateWishArgs struct {
@@ -34,6 +36,8 @@ type updateWishArgs struct {
 	URL          *string  `json:"url,omitempty" jsonschema:"new http(s) link; an empty string clears it"`
 	Price        *float64 `json:"price,omitempty" jsonschema:"new price, zero or more"`
 	CategoryName *string  `json:"category_name,omitempty" jsonschema:"move the wish to this category (created if needed); an empty string removes it from its category"`
+	Image        *string  `json:"image,omitempty" jsonschema:"set or replace the picture: a base64 data URI (data:image/jpeg;base64,... or data:image/png;base64,...), at most 10 MB decoded"`
+	ImageDelete  bool     `json:"image_delete,omitempty" jsonschema:"remove the wish's picture; cannot be combined with image"`
 }
 
 type deleteWishArgs struct {
@@ -66,13 +70,13 @@ func registerWishWriteTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_wish",
-		Description: "Add a wish to a wishlist you own or collaborate on. Names must be unique within the wishlist. Returns the new wish.",
+		Description: "Add a wish to a wishlist you own or collaborate on. Names must be unique within the wishlist. A picture can be given as a base64 data URI. Returns the new wish.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &no},
 	}, createWish)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_wish",
-		Description: "Edit a wish on a wishlist you own or collaborate on. Only the fields you provide change. Returns the updated wish.",
+		Description: "Edit a wish on a wishlist you own or collaborate on. Only the fields you provide change; image sets or replaces the picture and image_delete removes it. Returns the updated wish.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &yes, IdempotentHint: true},
 	}, updateWish)
 
@@ -134,6 +138,16 @@ func createWish(ctx context.Context, _ *mcp.CallToolRequest, args createWishArgs
 		}
 	}
 
+	// Decoded before anything is written, so a refused image leaves no wish
+	// behind.
+	var wishImage image.Image
+	if args.Image != "" {
+		wishImage, err = controllers.DecodeImageUpload(args.Image)
+		if err != nil {
+			return nil, nil, userError(err.Error())
+		}
+	}
+
 	unique, err := database.VerifyUniqueWishNameInWishlist(name, wishlistID)
 	if err != nil {
 		return nil, nil, errors.New("failed to verify the wish name")
@@ -157,6 +171,11 @@ func createWish(ctx context.Context, _ *mcp.CallToolRequest, args createWishArgs
 	if err != nil {
 		return nil, nil, errors.New("failed to create the wish")
 	}
+	if wishImage != nil {
+		if err := controllers.StoreWishImage(created.ID, wishImage); err != nil {
+			return nil, nil, errors.New("the wish was created but its picture could not be saved")
+		}
+	}
 	return jsonResult(newWishWriteOut(created)), nil, nil
 }
 
@@ -173,6 +192,17 @@ func updateWish(ctx context.Context, _ *mcp.CallToolRequest, args updateWishArgs
 	wish, err := writableWish(userID, wishID)
 	if err != nil {
 		return nil, nil, writeError(err, "failed to verify access")
+	}
+
+	var wishImage image.Image
+	if args.Image != nil && *args.Image != "" {
+		if args.ImageDelete {
+			return nil, nil, userError("Give either image or image_delete, not both.")
+		}
+		wishImage, err = controllers.DecodeImageUpload(*args.Image)
+		if err != nil {
+			return nil, nil, userError(err.Error())
+		}
 	}
 
 	if args.Name != nil {
@@ -229,6 +259,16 @@ func updateWish(ctx context.Context, _ *mcp.CallToolRequest, args updateWishArgs
 	updated, err := database.UpdateWishInDB(wish)
 	if err != nil {
 		return nil, nil, errors.New("failed to update the wish")
+	}
+
+	if wishImage != nil {
+		if err := controllers.StoreWishImage(updated.ID, wishImage); err != nil {
+			return nil, nil, errors.New("the wish was updated but its picture could not be saved")
+		}
+	} else if args.ImageDelete {
+		if err := controllers.DeleteWishImage(updated.ID); err != nil {
+			return nil, nil, errors.New("the wish was updated but its picture could not be removed")
+		}
 	}
 
 	// Like the web app, drop the category the wish left if it is now empty.

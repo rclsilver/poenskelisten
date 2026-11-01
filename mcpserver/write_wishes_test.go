@@ -1,9 +1,15 @@
 package mcpserver
 
 import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/png"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
 	"aunefyren/poenskelisten/models"
 
@@ -235,4 +241,65 @@ func TestWishToolsRefuseDisabledWishlist(t *testing.T) {
 	writeErr(t, collab.ID, "create_wish", map[string]any{"wishlist_id": wishlist.ID.String(), "name": "Something new"})
 	writeErr(t, collab.ID, "update_wish", map[string]any{"wish_id": wish.ID.String(), "name": "Renamed wish"})
 	writeErr(t, collab.ID, "delete_wish", map[string]any{"wish_id": wish.ID.String()})
+}
+
+// wishImageDataURI is a small valid PNG as the data URI the image fields take.
+func wishImageDataURI(t *testing.T) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+func wishHasImage(t *testing.T, id string) bool {
+	t.Helper()
+	exists, err := controllers.CheckIfWishImageExists(uuid.MustParse(id))
+	if err != nil {
+		t.Fatalf("failed to check the wish image: %v", err)
+	}
+	return exists
+}
+
+func TestWishImageTools(t *testing.T) {
+	setupMCPDB(t)
+	t.Cleanup(controllers.UseWishImageDir(filepath.Join(t.TempDir(), "wishes")))
+	owner := createMCPTestUser(t, "Ada")
+	wishlist := createWritableWishlist(t, owner.ID, "Birthday")
+	id := wishlist.ID.String()
+	picture := wishImageDataURI(t)
+
+	var created wishWriteOut
+	writeOK(t, owner.ID, "create_wish", map[string]any{"wishlist_id": id, "name": "Headphones", "image": picture}, &created)
+	if !wishHasImage(t, created.ID) {
+		t.Fatal("create_wish did not store the image")
+	}
+
+	// Replacing keeps an image; deleting removes it.
+	writeOK(t, owner.ID, "update_wish", map[string]any{"wish_id": created.ID, "image": picture}, nil)
+	if !wishHasImage(t, created.ID) {
+		t.Error("update_wish lost the image it replaced")
+	}
+	writeOK(t, owner.ID, "update_wish", map[string]any{"wish_id": created.ID, "image_delete": true}, nil)
+	if wishHasImage(t, created.ID) {
+		t.Error("image_delete left the image")
+	}
+
+	// Both at once is refused, and so is anything that isn't an image.
+	if msg := writeErr(t, owner.ID, "update_wish", map[string]any{"wish_id": created.ID, "image": picture, "image_delete": true}); !strings.Contains(msg, "image_delete") {
+		t.Errorf("image with image_delete = %q", msg)
+	}
+	writeErr(t, owner.ID, "update_wish", map[string]any{"wish_id": created.ID, "image": "not an image"})
+	if wishHasImage(t, created.ID) {
+		t.Error("a refused image was stored")
+	}
+
+	// A refused image on creation leaves no wish behind.
+	writeErr(t, owner.ID, "create_wish", map[string]any{"wishlist_id": id, "name": "Keyboard", "image": "data:image/png;base64,AAAA"})
+	var count int64
+	database.Instance.Model(&models.Wish{}).Where("name = ?", "Keyboard").Count(&count)
+	if count != 0 {
+		t.Errorf("a wish was created with a refused image")
+	}
 }

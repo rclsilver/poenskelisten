@@ -450,6 +450,27 @@ func storeUploadedImage(dir string, id uuid.UUID, base64String string) error {
 	return storeImage(dir, id, imageObject)
 }
 
+// DecodeImageUpload validates a base64 data-URI upload without storing it, so
+// a caller can refuse a bad image before it writes anything.
+func DecodeImageUpload(base64String string) (image.Image, error) {
+	return decodeImageUpload(base64String)
+}
+
+// StoreWishImage stores an image already checked by DecodeImageUpload as the
+// full-size and thumbnail images of a wish, replacing the ones it had.
+func StoreWishImage(wishID uuid.UUID, img image.Image) error {
+	return storeImage(wishImageDir, wishID, img)
+}
+
+// UseWishImageDir stores wish images in dir until the returned function puts
+// the previous directory back. It lets the tests of other packages keep their
+// images out of the source tree.
+func UseWishImageDir(dir string) (restore func()) {
+	previous := wishImageDir
+	wishImageDir = dir
+	return func() { wishImageDir = previous }
+}
+
 func storeImage(dir string, id uuid.UUID, img image.Image) error {
 	err := writeImageVariants(dir, id, img)
 	if err != nil {

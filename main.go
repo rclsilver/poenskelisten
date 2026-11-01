@@ -197,6 +197,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 		"/api/auth/wishes":          middlewares.ImageUploadMaxBodyBytes,
 		"/api/auth/wishes/:wish_id": middlewares.ImageUploadMaxBodyBytes,
 		"/api/auth/users/update":    middlewares.ImageUploadMaxBodyBytes,
+		"/mcp":                      middlewares.ImageUploadMaxBodyBytes,
 	}))
 
 	// Every endpoint that checks a password or a one-time code (or e-mails
