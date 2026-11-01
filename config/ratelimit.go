@@ -33,6 +33,10 @@ const (
 	// takes before it is locked for the rest of the window: wrong passwords
 	// per e-mail, and wrong second factors per user, from any address.
 	DefaultAccountRateLimit = "10/15m"
+	// DefaultUploadRateLimit is shared, per account, by the routes that can
+	// carry an image: creating and editing a wish, and updating one's account.
+	// Each image takes a moment of CPU and tens of megabytes to process.
+	DefaultUploadRateLimit = "30/10m"
 )
 
 // ParseRateLimit reads a limit written as "<requests>/<duration>", e.g.
@@ -94,6 +98,7 @@ func ValidateRateLimits(configFile models.ConfigStruct) error {
 		{"rate_limit_oauth", configFile.RateLimitOAuth},
 		{"rate_limit_register", configFile.RateLimitRegister},
 		{"rate_limit_account", configFile.RateLimitAccount},
+		{"rate_limit_upload", configFile.RateLimitUpload},
 	}
 	for _, setting := range settings {
 		if strings.TrimSpace(setting.value) == "" {
@@ -109,4 +114,9 @@ func ValidateRateLimits(configFile models.ConfigStruct) error {
 // AccountRateLimit is the per-account limit on failed sign-in attempts.
 func AccountRateLimit(configFile models.ConfigStruct) RateLimit {
 	return rateLimitOrDefault(configFile.RateLimitAccount, DefaultAccountRateLimit)
+}
+
+// UploadRateLimit is the per-account limit on the routes that can carry an image.
+func UploadRateLimit(configFile models.ConfigStruct) RateLimit {
+	return rateLimitOrDefault(configFile.RateLimitUpload, DefaultUploadRateLimit)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	logrusTest "github.com/sirupsen/logrus/hooks/test"
 )
@@ -236,6 +237,44 @@ func TestAPIRateLimitHasReadableError(t *testing.T) {
 	handler(other)
 	if other.IsAborted() {
 		t.Error("a different client should have its own budget")
+	}
+}
+
+// People behind one home connection each get their own upload budget.
+func TestUploadRateLimitCountsPerAccount(t *testing.T) {
+	setupMiddlewareConfig(t)
+	original := logger.Log
+	t.Cleanup(func() { logger.Log = original })
+	logger.Log, _ = logrusTest.NewNullLogger()
+
+	handler := UploadRateLimit(1, time.Minute)
+	send := func(token string) *httptest.ResponseRecorder {
+		ctx, w := rateLimitTestContext("203.0.113.1:12345")
+		if token != "" {
+			ctx.Request.Header.Set("Authorization", "Bearer "+token)
+		}
+		handler(ctx)
+		if !ctx.IsAborted() {
+			w.WriteHeader(http.StatusOK)
+		}
+		return w
+	}
+
+	alice, bob := apiTokenForUser(t, uuid.New(), false), apiTokenForUser(t, uuid.New(), false)
+	if w := send(alice); w.Code != http.StatusOK {
+		t.Fatalf("first upload = %d, want 200", w.Code)
+	}
+	w := send(alice)
+	var body map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusTooManyRequests || body["error"] == "" {
+		t.Errorf("second upload = %d %v, want 429 with a message the web app can show", w.Code, body)
+	}
+	if w := send(bob); w.Code != http.StatusOK {
+		t.Errorf("another account from the same address = %d, want its own budget", w.Code)
+	}
+	if w := send(""); w.Code != http.StatusOK {
+		t.Errorf("a request without a token = %d, want it counted by address", w.Code)
 	}
 }
 
