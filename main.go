@@ -157,7 +157,23 @@ func main() {
 	// Initialize Router
 	router := initRouter(config.ConfigFile)
 	logger.Log.Info("router initialized. starting Pønskelisten at http://*:" + strconv.Itoa(config.ConfigFile.PoenskelistenPort))
-	log.Fatal(router.Run(":" + strconv.Itoa(config.ConfigFile.PoenskelistenPort)))
+	log.Fatal(newServer(config.ConfigFile.PoenskelistenPort, router).ListenAndServe())
+}
+
+// newServer bounds how long a client may take over each part of a request,
+// which router.Run doesn't: a client sending or reading slowly, or not at
+// all, would keep its connection open for as long as it likes. The read
+// limit leaves time to upload the largest image request, 15 MiB, at about
+// 0.7 Mbit/s; the write limit runs from the same start.
+func newServer(port int, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + strconv.Itoa(port),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       3 * time.Minute,
+		WriteTimeout:      4 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
 func initRouter(configFile models.ConfigStruct) *gin.Engine {
