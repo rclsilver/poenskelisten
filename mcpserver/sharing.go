@@ -105,7 +105,7 @@ func registerSharingTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_wishlist_sharing",
 		Description: "Show who a wishlist you own is shared with: its groups, its collaborators and, when it is public, its public_hash. " +
-			"Only the owner can see this. A group marked member=false is one you have left but that can still see the wishlist; detach it to stop that. " +
+			"Only the owner can see this. A group marked member=false is one you are not in; detach it to stop it seeing the wishlist. " +
 			"The public link is managed with update_wishlist: setting public to false disables it, and setting it back to true issues a new link.",
 	}, getWishlistSharing)
 

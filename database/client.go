@@ -165,6 +165,9 @@ func Migrate() {
 	if err := EnsureOneClaimPerWish(); err != nil {
 		logger.Log.Error("failed to make the database refuse a second claim on a wish. error: " + err.Error())
 	}
+	if err := WithdrawWishlistsFromOutsideGroups(); err != nil {
+		logger.Log.Error("failed to withdraw wishlists from the groups their owners aren't in. error: " + err.Error())
+	}
 
 	logger.Log.Debug("database migration completed")
 }
