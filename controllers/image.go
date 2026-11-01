@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gen2brain/webp"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"golang.org/x/image/draw"
@@ -40,7 +41,7 @@ const (
 	// bytes per pixel before resizing copies it again. 4 MP is four times
 	// what is stored; the web app scales larger photos down before sending.
 	maxUploadPixels = 4_000_000
-	jpegQuality     = 85
+	webpQuality     = 85
 )
 
 // imageWorkers bounds how many images are decoded and resized at once, since
@@ -55,6 +56,8 @@ func imageFilePath(dir string, id uuid.UUID, thumbnail bool) string {
 	if thumbnail {
 		name += "_thumbnail"
 	}
+	// The extension is historical: images stored before WebP are JPEGs, and
+	// keeping the name avoids migrating them. Readers sniff the content.
 	return filepath.Join(dir, name+".jpg")
 }
 
@@ -223,7 +226,7 @@ func notModified(context *gin.Context, imageBytes []byte) bool {
 	return false
 }
 
-// loadStoredImage returns the stored JPEG for id at the requested size, with
+// loadStoredImage returns the stored image for id at the requested size, with
 // found=false if no image has been uploaded. Uploads are resized when stored,
 // but images stored by older versions are full-resolution originals without
 // a thumbnail; those are resized here once and written back, so each legacy
@@ -271,7 +274,7 @@ func loadStoredImage(dir string, id uuid.UUID, thumbnail bool) ([]byte, bool, er
 	// Write-back failures are only logged: the image is still served, and the
 	// resize is simply redone on the next request.
 	if oversized {
-		fullBytes, err = encodeJPEG(fitWithin(original, maxImageWidth, maxImageHeight))
+		fullBytes, err = encodeWebP(fitWithin(original, maxImageWidth, maxImageHeight))
 		if err != nil {
 			return nil, false, err
 		}
@@ -283,7 +286,7 @@ func loadStoredImage(dir string, id uuid.UUID, thumbnail bool) ([]byte, bool, er
 		return fullBytes, true, nil
 	}
 
-	thumbnailBytes, err := encodeJPEG(fitWithin(original, maxThumbnailWidth, maxThumbnailHeight))
+	thumbnailBytes, err := encodeWebP(fitWithin(original, maxThumbnailWidth, maxThumbnailHeight))
 	if err != nil {
 		return nil, false, err
 	}
@@ -311,6 +314,8 @@ func ImageBytesToBase64(image []byte) string {
 		base64Encoding = "data:image/jpeg;base64,"
 	case "image/png":
 		base64Encoding = "data:image/png;base64,"
+	case "image/webp":
+		base64Encoding = "data:image/webp;base64,"
 	default:
 		base64Encoding = "data:image/svg+xml;base64,"
 	}
@@ -364,22 +369,8 @@ func fitWithin(img image.Image, maxWidth int, maxHeight int) image.Image {
 	return resized
 }
 
-// flattenOnWhite composites transparent images onto white. JPEG has no alpha
-// channel, and encoding a transparent PNG as-is turns its transparent areas black.
-func flattenOnWhite(img image.Image) image.Image {
-	if opaque, ok := img.(interface{ Opaque() bool }); ok && opaque.Opaque() {
-		return img
-	}
-
-	bounds := img.Bounds()
-	flattened := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
-	draw.Draw(flattened, flattened.Bounds(), image.White, image.Point{}, draw.Src)
-	draw.Draw(flattened, flattened.Bounds(), img, bounds.Min, draw.Over)
-	return flattened
-}
-
 // decodeUploadedImage decodes an uploaded JPEG/PNG and bakes any EXIF
-// orientation into the pixels. The re-encode in encodeJPEG writes no
+// orientation into the pixels. The re-encode in encodeWebP writes no
 // metadata, which is what keeps EXIF (GPS, camera serial, timestamps) out of
 // stored and served images - but it also drops the orientation tag, so it has
 // to be applied here or phone photos end up sideways.
@@ -421,7 +412,7 @@ func decodeUploadedImage(imageBytes []byte, mimeType string) (image.Image, error
 		imageObject = utilities.ApplyOrientation(imageObject, utilities.JPEGOrientation(imageBytes))
 	}
 
-	return flattenOnWhite(imageObject), nil
+	return imageObject, nil
 }
 
 // decodeImageUpload checks and decodes a base64 data-URI upload. Its errors
@@ -484,11 +475,11 @@ func writeImageVariants(dir string, id uuid.UUID, img image.Image) error {
 	imageWorkers <- struct{}{}
 	defer func() { <-imageWorkers }()
 
-	fullBytes, err := encodeJPEG(fitWithin(img, maxImageWidth, maxImageHeight))
+	fullBytes, err := encodeWebP(fitWithin(img, maxImageWidth, maxImageHeight))
 	if err != nil {
 		return err
 	}
-	thumbnailBytes, err := encodeJPEG(fitWithin(img, maxThumbnailWidth, maxThumbnailHeight))
+	thumbnailBytes, err := encodeWebP(fitWithin(img, maxThumbnailWidth, maxThumbnailHeight))
 	if err != nil {
 		return err
 	}
@@ -498,9 +489,11 @@ func writeImageVariants(dir string, id uuid.UUID, img image.Image) error {
 	return writeFileAtomic(imageFilePath(dir, id, true), thumbnailBytes)
 }
 
-func encodeJPEG(img image.Image) ([]byte, error) {
+// encodeWebP writes a lossy WebP, which keeps the alpha channel JPEG lacks.
+// It writes no metadata, so EXIF stays out of stored images.
+func encodeWebP(img image.Image) ([]byte, error) {
 	buf := new(bytes.Buffer)
-	if err := jpeg.Encode(buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
+	if err := webp.Encode(buf, img, webp.Options{Quality: webpQuality}); err != nil {
 		return nil, errors.New("Failed to encode image: " + err.Error())
 	}
 	return buf.Bytes(), nil

@@ -617,7 +617,7 @@ func TestSaveWishImageAppliesOrientationAndStripsMetadata(t *testing.T) {
 	if bytes.Contains(stored, []byte("Exif")) {
 		t.Error("stored image still contains an EXIF block")
 	}
-	config, err := jpeg.DecodeConfig(bytes.NewReader(stored))
+	config, _, err := image.DecodeConfig(bytes.NewReader(stored))
 	if err != nil {
 		t.Fatalf("failed to decode stored image: %v", err)
 	}
@@ -806,7 +806,7 @@ func TestLoadStoredImageServesOversizedLegacyFileAsStored(t *testing.T) {
 	}
 }
 
-func TestSaveWishImageFlattensTransparencyOnWhite(t *testing.T) {
+func TestSaveWishImageKeepsTransparency(t *testing.T) {
 	imageTestSetup(t)
 	wishID := uuid.New()
 
@@ -822,13 +822,12 @@ func TestSaveWishImageFlattensTransparencyOnWhite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read stored image: %v", err)
 	}
-	img, err := jpeg.Decode(bytes.NewReader(stored))
+	img, _, err := image.Decode(bytes.NewReader(stored))
 	if err != nil {
 		t.Fatalf("failed to decode stored image: %v", err)
 	}
-	r, g, b, _ := img.At(10, 10).RGBA()
-	if r>>8 < 250 || g>>8 < 250 || b>>8 < 250 {
-		t.Errorf("transparent pixel stored as (%d,%d,%d), want white", r>>8, g>>8, b>>8)
+	if _, _, _, a := img.At(10, 10).RGBA(); a != 0 {
+		t.Errorf("transparent pixel stored with alpha %d, want 0", a>>8)
 	}
 }
 
@@ -849,7 +848,7 @@ func TestSaveWishImageStoresResizedVariants(t *testing.T) {
 		if err != nil {
 			t.Fatalf("thumbnail=%v: failed to read stored image: %v", c.thumbnail, err)
 		}
-		config, err := jpeg.DecodeConfig(bytes.NewReader(stored))
+		config, _, err := image.DecodeConfig(bytes.NewReader(stored))
 		if err != nil {
 			t.Fatalf("thumbnail=%v: failed to decode stored image: %v", c.thumbnail, err)
 		}
@@ -1154,9 +1153,9 @@ func TestLoadStoredImageWriteBackFailuresStillServe(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("found = %v err = %v, want the image served despite the failed write-back", found, err)
 			}
-			config, err := jpeg.DecodeConfig(bytes.NewReader(data))
+			config, _, err := image.DecodeConfig(bytes.NewReader(data))
 			if err != nil {
-				t.Fatalf("served bytes aren't a JPEG: %v", err)
+				t.Fatalf("served bytes aren't an image: %v", err)
 			}
 			if config.Width > c.maxDimension || config.Height > c.maxDimension {
 				t.Errorf("served image is %dx%d, want within %d", config.Width, config.Height, c.maxDimension)
@@ -1227,8 +1226,8 @@ func TestSaveWishImageWriteFails(t *testing.T) {
 func TestEncodeJPEGTooLarge(t *testing.T) {
 	// JPEG can't encode a dimension of 65536 or more.
 	img := image.NewGray(image.Rect(0, 0, 1<<16, 1))
-	if data, err := encodeJPEG(img); err == nil || data != nil {
-		t.Errorf("encodeJPEG = (%d bytes, %v), want an error", len(data), err)
+	if data, err := encodeWebP(img); err == nil || data != nil {
+		t.Errorf("encodeWebP = (%d bytes, %v), want an error", len(data), err)
 	}
 }
 

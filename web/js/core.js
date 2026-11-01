@@ -507,8 +507,8 @@
         };
     };
 
-    // Returns a smaller JPEG data URL, or null when the image already fits.
-    function shrinkImage(image) {
+    // Returns a smaller data URL, or null when the image already fits.
+    function shrinkImage(image, type) {
         var size = P.fitImageSize(image.naturalWidth, image.naturalHeight, P.MAX_IMAGE_PIXELS);
         if (size.width === image.naturalWidth && size.height === image.naturalHeight) {
             return null;
@@ -517,15 +517,13 @@
         canvas.width = size.width;
         canvas.height = size.height;
         var context = canvas.getContext("2d");
-        // JPEG has no transparency; the server flattens on white too.
-        context.fillStyle = "#fff";
-        context.fillRect(0, 0, size.width, size.height);
         context.drawImage(image, 0, 0, size.width, size.height);
-        return canvas.toDataURL("image/jpeg", 0.9);
+        // A PNG may be transparent, which JPEG would turn black.
+        return canvas.toDataURL(type === "image/png" ? "image/png" : "image/jpeg", 0.9);
     }
 
     P.isImageDataUrl = function (value) {
-        return typeof value === "string" && /^data:image\/(jpeg|png|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
+        return typeof value === "string" && /^data:image\/(jpeg|png|webp|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
     };
 
     // A quick answer only: the server checks the image again and re-encodes it.
@@ -559,7 +557,7 @@
                 probe.onload = function () {
                     var smaller = null;
                     try {
-                        smaller = shrinkImage(probe);
+                        smaller = shrinkImage(probe, file.type);
                     } catch (error) {
                         // The server will say if the original is too large.
                     }
