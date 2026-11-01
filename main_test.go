@@ -170,6 +170,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		"-testemail", "test@example.com",
 		"-name", "Wishes",
 		"-description", "A wishlist app",
+		"-defaultlanguage", " FR ",
 		"-loglevel", "debug",
 		"-dbport", "5432",
 		"-dbtype", "postgres",
@@ -227,6 +228,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		PoenskelistenTestEmail:      "test@example.com",
 		PoenskelistenName:           "Wishes",
 		PoenskelistenDescription:    "A wishlist app",
+		DefaultLanguage:             "fr",
 		PoenskelistenLogLevel:       "debug",
 		DBPort:                      5432,
 		DBType:                      "postgres",
@@ -264,6 +266,22 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 	}
 	if logger.Log.GetLevel() != logrus.DebugLevel {
 		t.Errorf("logger level = %v, want debug", logger.Log.GetLevel())
+	}
+}
+
+// A language the app isn't translated into stops startup, rather than
+// leaving pages in a language nobody chose.
+func TestParseFlagsDefaultLanguage(t *testing.T) {
+	withArgs(t, "-defaultlanguage", "auto")
+	out, _, _, err := parseFlags(models.ConfigStruct{DefaultLanguage: "fr"})
+	if err != nil || out.DefaultLanguage != "" {
+		t.Errorf("auto = %q (error %v), want \"\" to follow the browser", out.DefaultLanguage, err)
+	}
+
+	withArgs(t, "-defaultlanguage", "de")
+	_, _, _, err = parseFlags(models.ConfigStruct{DefaultLanguage: "fr"})
+	if err == nil || !strings.Contains(err.Error(), "defaultlanguage") || !strings.Contains(err.Error(), "en, fr or auto") {
+		t.Errorf("parseFlags error = %v, want an invalid -defaultlanguage error listing the choices", err)
 	}
 }
 
@@ -427,6 +445,20 @@ func TestInitRouterInjectsTemplateData(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Distinctive App Name") {
 		t.Errorf("manifest.json does not contain the configured app name; body: %s", w.Body.String())
+	}
+}
+
+// Every page tells the web app the instance's default language, empty when
+// each browser decides; a wrong value from a hand-edited config.json too.
+func TestInitRouterTellsPagesTheDefaultLanguage(t *testing.T) {
+	for configured, want := range map[string]string{"fr": "fr", "": "", "de": ""} {
+		router := initRouter(models.ConfigStruct{DefaultLanguage: configured})
+		for _, page := range []string{"/login", "/"} {
+			body := serve(router, http.MethodGet, page).Body.String()
+			if !strings.Contains(body, `<meta name="default-language" content="`+want+`">`) {
+				t.Errorf("default_language %q: GET %s lacks the meta tag with %q", configured, page, want)
+			}
+		}
 	}
 }
 

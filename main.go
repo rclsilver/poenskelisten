@@ -358,6 +358,8 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 		"appName":        configFile.PoenskelistenName,
 		"currency":       configFile.PoenskelistenCurrency,
 		"appDescription": configFile.PoenskelistenDescription,
+		// Empty: each visitor's browser decides (web/js/core.js, P.detectLang).
+		"defaultLanguage": config.DefaultLanguage(configFile),
 		// Rendered into the JS so the login/register pages never flash a
 		// password form on an OIDC-only instance.
 		"localLoginEnabled":    config.LocalLoginEnabled(),
@@ -509,6 +511,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 	var testemail = flag.String("testemail", configFile.PoenskelistenTestEmail, "The email all emails are sent to in test mode.")
 	var name = flag.String("name", configFile.PoenskelistenName, "The name of the application. Replaces 'Pønskelisten'.")
 	var description = flag.String("description", configFile.PoenskelistenDescription, "The description of the application.")
+	var defaultLanguage = flag.String("defaultlanguage", configFile.DefaultLanguage, "The language pages show in until a user picks one: 'en', 'fr', or 'auto' to follow each browser.")
 	var logLevel = flag.String("loglevel", configFile.PoenskelistenLogLevel, "The log level of the application. Default 'info'.")
 
 	// DB values
@@ -638,6 +641,14 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 
 	if provided["name"] || provided["description"] {
 		config.CleanAppText(&configFile)
+	}
+
+	if provided["defaultlanguage"] {
+		language, err := config.ParseDefaultLanguage(*defaultLanguage)
+		if err != nil {
+			return configFile, actions, flagsProvided, errors.New("invalid -defaultlanguage value: " + err.Error())
+		}
+		configFile.DefaultLanguage = language
 	}
 
 	if provided["loglevel"] {

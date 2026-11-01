@@ -26,6 +26,7 @@ argCount=$#
 [ -n "$testemail" ] && set -- "$@" --testemail "$testemail"
 [ -n "$name" ] && set -- "$@" --name "$name"
 [ -n "$description" ] && set -- "$@" --description "$description"
+[ -n "$defaultlanguage" ] && set -- "$@" --defaultlanguage "$defaultlanguage"
 [ -n "$loglevel" ] && set -- "$@" --loglevel "$loglevel"
 
 # Add database-related flags if the corresponding environment variables are set

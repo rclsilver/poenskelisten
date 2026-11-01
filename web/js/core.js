@@ -38,9 +38,14 @@
     P.lang = "en";
     var dictionary = {};
 
-    P.detectLang = function (saved, browserLangs) {
+    // The language the user picked, else the one the instance is set to,
+    // else the browser's, else English.
+    P.detectLang = function (saved, browserLangs, instanceLang) {
         if (P.LANGS.indexOf(saved) !== -1) {
             return saved;
+        }
+        if (P.LANGS.indexOf(instanceLang) !== -1) {
+            return instanceLang;
         }
         var langs = browserLangs || [];
         for (var i = 0; i < langs.length; i++) {
@@ -110,7 +115,7 @@
     };
 
     P.loadI18n = function () {
-        var lang = P.detectLang(P.prefs.get("lang"), root.navigator ? root.navigator.languages || [root.navigator.language] : []);
+        var lang = P.detectLang(P.prefs.get("lang"), root.navigator ? root.navigator.languages || [root.navigator.language] : [], P.defaultLang());
         return root.fetch("/json/lang-" + lang + ".json", { credentials: "same-origin" })
             .then(function (response) {
                 return response.ok ? response.json() : {};
@@ -123,6 +128,13 @@
                 doc.documentElement.lang = lang;
                 P.applyI18n(doc);
             });
+    };
+
+    // The instance's default language (defaultlanguage), from the page's
+    // meta tag; empty when the browser decides.
+    P.defaultLang = function () {
+        var meta = doc && doc.querySelector('meta[name="default-language"]');
+        return meta ? meta.getAttribute("content") || "" : "";
     };
 
     // The name is read back from the meta tag html/template escaped, never
