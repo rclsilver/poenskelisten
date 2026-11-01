@@ -16,8 +16,8 @@ Never run `git` commands (commit, push, branch, reset, etc.) in this repo — gi
 
 Build / vet / format — CI enforces all three, must be clean:
 ```
-go build ./...
-go vet ./...
+go build -tags nodynamic ./...
+go vet -tags nodynamic ./...
 gofmt -l .              # must print nothing; gofmt -w . to fix
 ```
 
@@ -26,7 +26,7 @@ Tests:
 go test ./...                                     # whole module
 go test ./controllers/...                         # one package
 go test ./controllers/... -run TestGroupJoin -v    # one test, verbose
-go test -race -covermode=atomic -coverprofile=coverage.out -timeout 20m ./...   # exactly what CI runs
+go test -tags nodynamic -race -covermode=atomic -coverprofile=coverage.out -timeout 20m ./...   # exactly what CI runs
 go tool cover -func=coverage.out | tail -1         # print the total %
 node --test tests/web/*.test.mjs                   # front-end unit tests (Node 20+, no dependency)
 ```
@@ -56,7 +56,7 @@ Supporting packages: `auth` (JWT/OAuth token minting + validation), `middlewares
 
 **Frontend is not an SPA.** `web/html/*.html` are Go `html/template` pages built from the shared parts in `web/templates/layout.html` (head, header, main area), each loading its own `web/js/*.js`. The scripts are served through `text/template` too but use no template action: the application name comes from the page's `application-name` meta tag. `web/js/core.js` is the library every page uses: `P.h` builds elements and sets user values as text (never `innerHTML`; `main_test.go` enforces it), `P.t` translates with the dictionaries in `web/json/lang-*.json`, `P.api` calls `/api` with `fetch`, and `P.page` wires a page (translations, session from `web/js/session.js`, header). `web/js/cards.js` holds the list and wish cards. There's no client-side router or bundler. `main.go`'s `registerTemplatedStaticFilesForDirectory` derives a page's URL from its filename automatically; give it an explicit entry in that function's path table only for parameterized routes (`/groups/:group_id`) or when a URL needs to diverge from the filename (see the `/login/mfa` route, which re-serves `login.html` so the MFA step is a real navigation rather than a DOM swap — some password managers only offer autofill after a real navigation; the edit forms are served the same way). See `docs/ui.md` for what the pages do and who may do it.
 
-**Database:** driver picked by `config.ConfigFile.DBType` (`sqlite`/`postgres`/`mysql`); SQLite always uses the CGO-free `modernc.org/sqlite` driver, since the release binary builds with `CGO_ENABLED=0`. `database.Migrate()` auto-migrates every model and seeds the first-party OAuth client.
+**Database:** driver picked by `config.ConfigFile.DBType` (`sqlite`/`postgres`/`mysql`); SQLite always uses the CGO-free `modernc.org/sqlite` driver, since the release binary builds with `CGO_ENABLED=0`. For the same reason the build uses `-tags nodynamic`, so the WebP package (`gen2brain/webp`) never loads a system libwebp. `database.Migrate()` auto-migrates every model and seeds the first-party OAuth client.
 
 ## Testing patterns
 

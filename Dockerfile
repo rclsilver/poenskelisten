@@ -21,9 +21,11 @@ ARG VERSION
 
 # GOARM comes from the variant (linux/arm/v7 -> 7) and only applies to GOARCH=arm;
 # arm64 can carry a "v8" variant that must not leak into GOARM.
+# nodynamic keeps the WebP package from loading a system libwebp, which would
+# leave the binary dynamically linked and looking for the library at start.
 RUN if [ "${TARGETARCH}" = "arm" ]; then export GOARM="${TARGETVARIANT#v}"; fi && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w -X aunefyren/poenskelisten/config.version=${VERSION}" -o /app/poenskelisten .
+    go build -tags nodynamic -trimpath -ldflags="-s -w -X aunefyren/poenskelisten/config.version=${VERSION}" -o /app/poenskelisten .
 
 # ---------- Runtime ----------
 FROM alpine:3.24
