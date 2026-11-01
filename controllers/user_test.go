@@ -258,6 +258,29 @@ func TestRegisterUserInvalidInviteCode(t *testing.T) {
 	}
 }
 
+// While an unused invite existed, an empty invite code passed the invite
+// check, so anyone could tell from the answer whether an e-mail address had
+// an account. It is refused like any wrong code, before the address is
+// looked at.
+func TestRegisterUserEmptyInviteRevealsNoAccount(t *testing.T) {
+	setupControllersDB(t)
+	existing := createTestUser(t)
+	createTestInvite(t)
+
+	answers := []map[string]interface{}{}
+	for _, email := range []string{*existing.Email, "nobody@example.com"} {
+		body := fmt.Sprintf(`{"first_name":"Ada","last_name":"Lovelace","email":"%s","password":"Sup3rSecret!","password_repeat":"Sup3rSecret!","invite_code":" "}`, email)
+		code, resp, _ := doRequest(RegisterUser, "POST", "/api/open/users/register", body, nil, nil)
+		if code != 400 || resp["error"] != "Invitiation code is not valid." {
+			t.Errorf("%s: status = %d %v, want 400 for the invite code", email, code, resp)
+		}
+		answers = append(answers, resp)
+	}
+	if fmt.Sprint(answers[0]) != fmt.Sprint(answers[1]) {
+		t.Errorf("answers differ: %v / %v", answers[0], answers[1])
+	}
+}
+
 func TestRegisterUserDuplicateEmail(t *testing.T) {
 	setupControllersDB(t)
 	existing := createTestUser(t)
