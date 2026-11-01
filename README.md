@@ -368,9 +368,11 @@ The e-mail is matched ignoring case. Surrounding whitespace and quotes are trimm
 
 Requires Go installed:
 ```bash
-go build
+CGO_ENABLED=0 go build -tags nodynamic
 ./poenskelisten
 ```
+
+`nodynamic` makes the WebP encoder use its built-in Go version only, so the binary is static and never looks for a system libwebp.
 
 Add flags to configure:
 ```bash

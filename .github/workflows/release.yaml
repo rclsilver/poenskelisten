@@ -34,6 +34,7 @@ jobs:
         goversion: "1.26"
         binary_name: "poenskelisten"
         ldflags: "-s -w"
+        build_flags: -tags nodynamic
         # Only web/ (templates + static assets) is read at runtime; the Go
         # packages are compiled into the binary.
         extra_files: README.md LICENSE web
