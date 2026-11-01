@@ -99,6 +99,13 @@ func GenerateToken(context *gin.Context) {
 		context.Abort()
 		return
 	}
+	// Wrong passwords count under the e-mail typed, so an account is only
+	// reached under its own address: MySQL's default collations also match
+	// it written with other accents, and each spelling would have a budget of
+	// its own.
+	if found && (user.Email == nil || emailAttemptKey(*user.Email) != attemptKey) {
+		found = false
+	}
 
 	// An unknown e-mail gets the same answer as a wrong password: the same
 	// status, the same message and, through passwordMatches, the same delay.

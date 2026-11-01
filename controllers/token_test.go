@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	sqlitedriver "modernc.org/sqlite"
 )
 
 func postGenerateToken(body string) (int, map[string]interface{}) {
@@ -229,6 +232,76 @@ func TestGenerateTokenLocksAccountAfterFailures(t *testing.T) {
 	// Another account isn't affected.
 	if code, _ := postGenerateToken(`{"email":"` + *other.Email + `","password":"Other-Passw0rd"}`); code != 200 {
 		t.Errorf("other account = %d, want 200", code)
+	}
+}
+
+// registerAccentInsensitiveCollation adds to SQLite a collation that, like
+// MySQL's default ones, ignores case and accents. It applies to connections
+// opened afterwards.
+var registerAccentInsensitiveCollation = sync.OnceValue(func() error {
+	fold := strings.NewReplacer("é", "e", "è", "e", "ê", "e", "ë", "e")
+	return sqlitedriver.RegisterCollationUtf8("accent_ci", func(left, right string) int {
+		return strings.Compare(fold.Replace(strings.ToLower(left)), fold.Replace(strings.ToLower(right)))
+	})
+})
+
+// compareEmailsLikeMySQL recreates the empty users table with its e-mail
+// column under that collation.
+func compareEmailsLikeMySQL(t *testing.T) {
+	t.Helper()
+	var createTable string
+	if err := database.Instance.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").Scan(&createTable).Error; err != nil {
+		t.Fatalf("failed to read the users table: %v", err)
+	}
+	collated := strings.Replace(createTable, "`email` text", "`email` text COLLATE accent_ci", 1)
+	if collated == createTable {
+		t.Fatalf("no e-mail column found in %s", createTable)
+	}
+	if err := database.Instance.Exec("DROP TABLE users").Error; err != nil {
+		t.Fatalf("failed to drop the users table: %v", err)
+	}
+	if err := database.Instance.Exec(collated).Error; err != nil {
+		t.Fatalf("failed to recreate the users table: %v", err)
+	}
+}
+
+// Under MySQL's default collations the lookup also finds an account from its
+// address written with other accents. Each spelling has a lock budget of its
+// own, so only the account's own address may sign in to it.
+func TestGenerateTokenSignsInOnlyUnderTheAccountsOwnAddress(t *testing.T) {
+	if err := registerAccentInsensitiveCollation(); err != nil {
+		t.Fatalf("failed to register the collation: %v", err)
+	}
+	setupControllersDB(t)
+	compareEmailsLikeMySQL(t)
+	enablePrivateKey(t)
+	limitSignInAttempts(t, 3)
+	user := createTestUserWithPassword(t, "Correct-Passw0rd")
+	local := "elise-" + uuid.NewString()
+	email := local + "@example.com"
+	user.Email = &email
+	if _, err := database.UpdateUserInDB(user); err != nil {
+		t.Fatalf("failed to set the e-mail: %v", err)
+	}
+	variants := []string{"é" + local[1:] + "@example.com", "È" + local[1:] + "@example.com"}
+	for _, variant := range variants {
+		if found, err := database.GetAllUserInformationByEmail(variant); err != nil || found.ID != user.ID {
+			t.Fatalf("the lookup should find the account from %q, like MySQL (err %v)", variant, err)
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		if code, _ := postGenerateToken(`{"email":"` + email + `","password":"wrong"}`); code != 401 {
+			t.Fatalf("attempt %d = %d, want 401", i+1, code)
+		}
+	}
+	if code, _ := postGenerateToken(`{"email":"` + email + `","password":"Correct-Passw0rd"}`); code != 429 {
+		t.Errorf("own address once locked = %d, want 429", code)
+	}
+	for _, variant := range variants {
+		if code, _ := postGenerateToken(`{"email":"` + variant + `","password":"Correct-Passw0rd"}`); code != 401 {
+			t.Errorf("right password under %q = %d, want 401: it isn't the account's address", variant, code)
+		}
 	}
 }
 
