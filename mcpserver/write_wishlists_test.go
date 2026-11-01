@@ -253,3 +253,51 @@ func TestDeleteWishlistTool(t *testing.T) {
 		t.Errorf("second delete = %q, want not found", msg)
 	}
 }
+
+// clearWishlistFlags sets a wishlist's claimable, public and hide_claimers to
+// NULL, as a database edited by hand or migrated from elsewhere could have
+// them. The schema forbids it, so the table is first rebuilt without its NOT
+// NULL constraints.
+func clearWishlistFlags(t *testing.T, wishlistID uuid.UUID) {
+	t.Helper()
+	var createTable string
+	if err := database.Instance.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wishlists'").Scan(&createTable).Error; err != nil {
+		t.Fatalf("failed to read the wishlists table: %v", err)
+	}
+	relaxed := strings.Replace(strings.ReplaceAll(createTable, " NOT NULL", ""), "`wishlists`", "`wishlists_relaxed`", 1)
+	for _, statement := range []string{
+		relaxed,
+		"INSERT INTO wishlists_relaxed SELECT * FROM wishlists",
+		"DROP TABLE wishlists",
+		"ALTER TABLE wishlists_relaxed RENAME TO wishlists",
+	} {
+		if err := database.Instance.Exec(statement).Error; err != nil {
+			t.Fatalf("failed to rebuild the wishlists table (%s): %v", statement, err)
+		}
+	}
+	if err := database.Instance.Exec("UPDATE wishlists SET claimable = NULL, public = NULL, hide_claimers = NULL WHERE id = ?", wishlistID).Error; err != nil {
+		t.Fatalf("failed to clear the flags: %v", err)
+	}
+}
+
+// A wishlist whose flags are missing reads as one whose flags are off,
+// rather than failing every tool that touches it.
+func TestToolsTakeMissingWishlistFlagsAsOff(t *testing.T) {
+	setupMCPDB(t)
+	owner := createMCPTestUser(t, "Ada")
+	wishlist := createWritableWishlist(t, owner.ID, "Old list")
+	createMCPWish(t, owner, wishlist, "Old wish")
+	clearWishlistFlags(t, wishlist.ID)
+
+	var wishes []wishOut
+	callTool(t, owner.ID, "list_wishes", map[string]any{"wishlist_id": wishlist.ID.String()}, &wishes)
+	if len(wishes) != 1 || wishes[0].Name != "Old wish" {
+		t.Errorf("list_wishes = %+v, want the one wish", wishes)
+	}
+
+	var out wishlistWriteOut
+	writeOK(t, owner.ID, "update_wishlist", map[string]any{"wishlist_id": wishlist.ID.String(), "name": "Renamed list"}, &out)
+	if out.Name != "Renamed list" || out.Claimable || out.Public {
+		t.Errorf("update_wishlist = %+v, want the new name and the flags off", out)
+	}
+}

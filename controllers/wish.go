@@ -209,7 +209,7 @@ func ConvertWishToWishObject(wish models.Wish, requestUserID *uuid.UUID) (models
 	wishObject.Price = wish.Price
 	wishObject.UpdatedAt = wish.UpdatedAt
 	wishObject.WishlistID = wish.WishlistID
-	wishObject.WishClaimable = *wishlist.Claimable
+	wishObject.WishClaimable = wishlist.Claimable != nil && *wishlist.Claimable
 	wishObject.Collaborators = wishlistCollabObjects
 	wishObject.Currency = config.ConfigFile.PoenskelistenCurrency
 	wishObject.CurrencyPadding = config.ConfigFile.PoenskelistenCurrencyPad
@@ -697,7 +697,7 @@ func RegisterWishClaim(context *gin.Context) {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to find wishlist."})
 		context.Abort()
 		return
-	} else if !*wishlistObject.Claimable {
+	} else if wishlistObject.Claimable == nil || !*wishlistObject.Claimable {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Wishes in the wishlist are not marked as claimable."})
 		context.Abort()
 		return
@@ -875,7 +875,7 @@ func RemoveWishClaim(context *gin.Context) {
 		context.JSON(http.StatusNotFound, gin.H{"error": "Failed to find wishlist."})
 		context.Abort()
 		return
-	} else if !*wishlistObject.Claimable {
+	} else if wishlistObject.Claimable == nil || !*wishlistObject.Claimable {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Wishes in the wishlist are not marked as claimable."})
 		context.Abort()
 		return
