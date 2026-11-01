@@ -198,6 +198,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		"-ratelimitoauth", "off",
 		"-ratelimitregister", "3/2h",
 		"-ratelimitaccount", "4/30m",
+		"-ratelimitupload", "6/5m",
 		"-generateinvite", "true",
 	)
 	logLevel := logger.Log.GetLevel()
@@ -254,6 +255,7 @@ func TestParseFlagsOverridesEveryField(t *testing.T) {
 		RateLimitOAuth:              "off",
 		RateLimitRegister:           "3/2h",
 		RateLimitAccount:            "4/30m",
+		RateLimitUpload:             "6/5m",
 	}
 	if out != want {
 		t.Errorf("parsed config mismatch:\n got %+v\nwant %+v", out, want)
@@ -783,6 +785,48 @@ func TestInitRouterRateLimitsLoginAndOAuth(t *testing.T) {
 	}
 	if code := postFrom(router, "/oauth/revoke", client, formType, ""); code != http.StatusTooManyRequests {
 		t.Errorf("second OAuth request = %d, want 429", code)
+	}
+}
+
+// Creating and editing wishes and updating one's account can carry an image,
+// so they share one budget per account, whatever address it comes from.
+func TestInitRouterRateLimitsUploadsPerAccount(t *testing.T) {
+	_, token := setupRouterTest(t)
+	config.ConfigFile.RateLimitUpload = "2/1m"
+	router := initRouter(config.ConfigFile)
+
+	now := time.Now()
+	lists := map[string]models.Wishlist{}
+	tokens := map[string]string{}
+	for _, name := range []string{"Alice", "Bob"} {
+		user := createRouterUser(t, name, false)
+		list := models.Wishlist{Name: name + " list", Enabled: true, OwnerID: user.ID, Date: &now}
+		list.ID = uuid.New()
+		createRouterRecord(t, &list)
+		lists[name], tokens[name] = list, token(user.ID, false)
+	}
+	send := func(name, path, body string) int {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.RemoteAddr = "203.0.113.20:5000"
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", tokens[name])
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	aliceWishes := "/api/auth/wishes?wishlist=" + lists["Alice"].ID.String()
+	codes := []int{
+		send("Alice", aliceWishes, `{"name":"First gift"}`),
+		send("Alice", aliceWishes, `{"name":"Second gift"}`),
+		send("Alice", aliceWishes, `{"name":"Third gift"}`),
+		send("Alice", "/api/auth/users/update", `{}`),
+	}
+	if codes[0] != http.StatusCreated || codes[1] != http.StatusCreated || codes[2] != http.StatusTooManyRequests || codes[3] != http.StatusTooManyRequests {
+		t.Errorf("Alice's codes = %v, want [201 201 429 429]", codes)
+	}
+	if code := send("Bob", "/api/auth/wishes?wishlist="+lists["Bob"].ID.String(), `{"name":"First gift"}`); code != http.StatusCreated {
+		t.Errorf("Bob from the same address = %d, want 201 with his own budget", code)
 	}
 }
 

@@ -191,6 +191,9 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 	registerRateLimit := config.RegisterRateLimit(configFile)
 	// Failed passwords and codes are also counted per account, from any address.
 	controllers.SetSignInAttemptLimit(config.AccountRateLimit(configFile))
+	// The routes that can carry an image share a budget per account.
+	uploadRateLimit := config.UploadRateLimit(configFile)
+	uploadLimit := middlewares.UploadRateLimit(uploadRateLimit.Max, uploadRateLimit.Window)
 
 	// API endpoint
 	api := router.Group("/api")
@@ -262,11 +265,11 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			auth.GET("/wishlists/:wishlist_id/categories", controllers.APIGetWishlistCategories)
 
 			auth.GET("/wishes", controllers.GetWishesFromWishlist)
-			auth.POST("/wishes", controllers.RegisterWish)
+			auth.POST("/wishes", uploadLimit, controllers.RegisterWish)
 			auth.DELETE("/wishes/:wish_id", controllers.DeleteWish)
 			auth.POST("/wishes/:wish_id/claim", controllers.RegisterWishClaim)
 			auth.POST("/wishes/:wish_id/unclaim", controllers.RemoveWishClaim)
-			auth.POST("/wishes/:wish_id", controllers.APIUpdateWish)
+			auth.POST("/wishes/:wish_id", uploadLimit, controllers.APIUpdateWish)
 			auth.GET("/wishes/:wish_id", controllers.APIGetWish)
 
 			auth.GET("/news", controllers.GetNews)
@@ -276,7 +279,7 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			auth.GET("/users/:user_id/image", controllers.APIGetUserProfileImage)
 			auth.GET("/users", controllers.GetUsers)
 			// These two check the current password.
-			auth.POST("/users/update", loginLimit, controllers.UpdateUser)
+			auth.POST("/users/update", loginLimit, uploadLimit, controllers.UpdateUser)
 
 			auth.POST("/users/mfa/disable", loginLimit, controllers.APIDisableMFA)
 		}
@@ -528,6 +531,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 	var rateLimitOAuth = flag.String("ratelimitoauth", configFile.RateLimitOAuth, "Requests per client address to the OAuth authorize, consent, token and revoke endpoints, e.g. 60/1m, or off. Default "+config.DefaultOAuthRateLimit+".")
 	var rateLimitRegister = flag.String("ratelimitregister", configFile.RateLimitRegister, "OAuth client registrations per client address, e.g. 10/1h, or off. Default "+config.DefaultRegisterRateLimit+".")
 	var rateLimitAccount = flag.String("ratelimitaccount", configFile.RateLimitAccount, "Failed sign-in attempts per account (wrong passwords per e-mail, wrong codes per user) before it is locked for the rest of the window, e.g. 10/15m, or off. Default "+config.DefaultAccountRateLimit+".")
+	var rateLimitUpload = flag.String("ratelimitupload", configFile.RateLimitUpload, "Requests per account to the routes that can carry an image (creating or editing a wish, updating one's account), e.g. 30/10m, or off. Default "+config.DefaultUploadRateLimit+".")
 
 	// Generate invite
 	var generateInvite = flag.String("generateinvite", "false", "If an invite code should be automatically generate on startup.")
@@ -729,6 +733,7 @@ func parseFlags(configFile models.ConfigStruct) (models.ConfigStruct, startupAct
 		{"ratelimitoauth", rateLimitOAuth, &configFile.RateLimitOAuth},
 		{"ratelimitregister", rateLimitRegister, &configFile.RateLimitRegister},
 		{"ratelimitaccount", rateLimitAccount, &configFile.RateLimitAccount},
+		{"ratelimitupload", rateLimitUpload, &configFile.RateLimitUpload},
 	}
 	for _, rateLimitFlag := range rateLimitFlags {
 		if !provided[rateLimitFlag.name] {

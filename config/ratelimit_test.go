@@ -51,6 +51,9 @@ func TestRateLimitsFallBackToDefaults(t *testing.T) {
 	if got := AccountRateLimit(ConfigFile); got != (RateLimit{Max: 10, Window: 15 * time.Minute}) {
 		t.Errorf("AccountRateLimit = %+v, want the 10/15m default", got)
 	}
+	if got := UploadRateLimit(ConfigFile); got != (RateLimit{Max: 30, Window: 10 * time.Minute}) {
+		t.Errorf("UploadRateLimit = %+v, want the 30/10m default", got)
+	}
 	if got := RegisterRateLimit(ConfigFile); got != (RateLimit{Max: 10, Window: time.Hour}) {
 		t.Errorf("RegisterRateLimit = %+v, want the 10/1h default", got)
 	}

@@ -116,6 +116,7 @@ You can configure Pønskelisten in **three different ways**:
 | rate_limit_oauth | ratelimitoauth | ratelimitoauth | string | Requests per visitor address, shared by `/oauth/authorize`, `/oauth/consent`, `/oauth/token` and `/oauth/revoke`, or `off`. Default `60/1m` |
 | rate_limit_register | ratelimitregister | ratelimitregister | string | App registrations (`/oauth/register`) per visitor address, or `off`. Default `10/1h` |
 | rate_limit_account | ratelimitaccount | ratelimitaccount | string | Failed sign-in attempts per account, from any address, before it is locked for the rest of the window: wrong passwords per e-mail, wrong MFA codes per user. Default `10/15m`, or `off` |
+| rate_limit_upload | ratelimitupload | ratelimitupload | string | Requests per account to the routes that can carry an image: creating and editing wishes, and updating one's account. Default `30/10m`, or `off` |
 | mfa_recovery_codes_enabled | mfarecoverycodes | mfarecoverycodes | bool | Issue single-use recovery codes on MFA enrollment (default off; when off, an admin must remove MFA for locked-out users) |
 | oidc_enabled | oidcenabled | oidcenabled | bool | Enable OpenID Connect single sign-on |
 | oidc_provider_name | oidcprovidername | oidcprovidername | string | Display name on the SSO login button (e.g. "Authelia") |
@@ -157,6 +158,8 @@ Password and code checks are rate-limited per visitor address (IPv6 addresses ar
 - `rate_limit_oauth` (default `60/1m`): the OAuth endpoints used by the web app and connected apps. An open tab refreshes its token every ten minutes.
 - `rate_limit_register` (default `10/1h`): registration of new connected apps (MCP clients register once, when you connect them).
 - `rate_limit_account` (default `10/15m`): failed attempts per account, whatever address they come from, so guessing can't be spread over many addresses. Wrong passwords count per e-mail typed (an e-mail without an account locks the same way, so the lock tells nothing), wrong MFA codes per user. A locked account is refused with `429` until its oldest failure is older than the window, even with the right password, which also keeps out the real user meanwhile; a successful sign-in clears the count.
+
+- `rate_limit_upload` (default `30/10m`): creating and editing wishes and updating one's account, which can all carry an image. It is counted per account rather than per address, so people sharing a home connection each have their own.
 
 Write a limit as `<requests>/<duration>` (durations like `30s`, `15m`, `1h`), or `off` to turn it off. The counters live in memory and start over on a restart. Behind a reverse proxy, set [`trustedproxies`](#behind-a-reverse-proxy) first, or all your visitors share one budget.
 

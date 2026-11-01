@@ -41,6 +41,7 @@ type ConfigStruct struct {
 	RateLimitOAuth              string `json:"rate_limit_oauth"`
 	RateLimitRegister           string `json:"rate_limit_register"`
 	RateLimitAccount            string `json:"rate_limit_account"`
+	RateLimitUpload             string `json:"rate_limit_upload"`
 	SMTPEnabled                 bool   `json:"smtp_enabled"`
 	SMTPHost                    string `json:"smtp_host"`
 	SMTPPort                    int    `json:"smtp_port"`

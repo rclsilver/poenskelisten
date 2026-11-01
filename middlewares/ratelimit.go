@@ -183,16 +183,25 @@ func setRetryAfter(ctx *gin.Context, wait time.Duration) {
 	ctx.Header("Retry-After", strconv.Itoa(seconds))
 }
 
-// limitRequests builds a middleware that limits requests per clientKey and
-// answers refused ones with respond. A non-positive max turns it off. Every
-// route given the same returned handler shares one budget.
-func limitRequests(max int, window time.Duration, respond func(*gin.Context)) gin.HandlerFunc {
+// accountKey is the account a request is signed in as, or its clientKey when
+// it carries no valid access token.
+func accountKey(ctx *gin.Context) string {
+	if userID, err := GetAuthUsername(ctx.GetHeader("Authorization")); err == nil {
+		return "user " + userID.String()
+	}
+	return clientKey(ctx)
+}
+
+// limitRequests builds a middleware that limits requests per key and answers
+// refused ones with respond. A non-positive max turns it off. Every route
+// given the same returned handler shares one budget.
+func limitRequests(max int, window time.Duration, key func(*gin.Context) string, respond func(*gin.Context)) gin.HandlerFunc {
 	if max <= 0 {
 		return func(ctx *gin.Context) { ctx.Next() }
 	}
 	limiter := newRateLimiter(max, window)
 	return func(ctx *gin.Context) {
-		key := clientKey(ctx)
+		key := key(ctx)
 		allowed, retryAfter, firstRefusal := limiter.allow(key)
 		if !allowed {
 			if firstRefusal {
@@ -210,7 +219,7 @@ func limitRequests(max int, window time.Duration, respond func(*gin.Context)) gi
 // RateLimit limits requests per client to max within a sliding window,
 // returning 429 with an OAuth-style error body (for the /oauth endpoints).
 func RateLimit(max int, window time.Duration) gin.HandlerFunc {
-	return limitRequests(max, window, func(ctx *gin.Context) {
+	return limitRequests(max, window, clientKey, func(ctx *gin.Context) {
 		ctx.JSON(http.StatusTooManyRequests, gin.H{
 			"error":             "rate_limited",
 			"error_description": "Too many requests. Please try again later.",
@@ -221,8 +230,17 @@ func RateLimit(max int, window time.Duration) gin.HandlerFunc {
 // APIRateLimit is RateLimit for the JSON API: the web app shows the "error"
 // field of a failed request to the user, so it carries a readable message.
 func APIRateLimit(max int, window time.Duration) gin.HandlerFunc {
-	return limitRequests(max, window, func(ctx *gin.Context) {
+	return limitRequests(max, window, clientKey, func(ctx *gin.Context) {
 		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many attempts. Please wait a few minutes and try again."})
+	})
+}
+
+// UploadRateLimit limits the routes that can carry an image per account
+// rather than per address, so people sharing a home connection each get
+// their own budget.
+func UploadRateLimit(max int, window time.Duration) gin.HandlerFunc {
+	return limitRequests(max, window, accountKey, func(ctx *gin.Context) {
+		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many changes in a short time. Please wait a few minutes and try again."})
 	})
 }
 
