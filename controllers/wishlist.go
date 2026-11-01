@@ -73,6 +73,21 @@ func RegisterWishlist(context *gin.Context) {
 		}
 	}
 
+	// The answer lists the group's wishlists, which only its members may see.
+	if groupContextID != nil {
+		isMember, err := database.VerifyUserMembershipToGroup(userID, *groupContextID)
+		if err != nil {
+			logger.Log.Error("Failed to verify membership to group. Error: " + err.Error())
+			context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify membership to group."})
+			context.Abort()
+			return
+		} else if !isMember {
+			context.JSON(http.StatusBadRequest, gin.H{"error": "You are not a member of this group."})
+			context.Abort()
+			return
+		}
+	}
+
 	if len(wishlist.Name) < 5 || wishlist.Name == "" {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "The name of the wishlist must be five or more letters."})
 		context.Abort()

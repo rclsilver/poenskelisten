@@ -773,6 +773,33 @@ func TestRegisterWishlistWithGroupContextID(t *testing.T) {
 	}
 }
 
+// Creating a list "from" a group answers with the group's wishlists, claims
+// included, so it is refused to anyone outside the group, before the list
+// is created.
+func TestRegisterWishlistGroupContextNeedsMembership(t *testing.T) {
+	setupControllersDB(t)
+	owner, claimant, outsider := createTestUser(t), createTestUser(t), createTestUser(t)
+	group := createTestGroup(t, owner.ID)
+	addGroupMembership(t, group.ID, owner.ID)
+	addGroupMembership(t, group.ID, claimant.ID)
+	shared := makeClaimable(t, createTestWishlist(t, owner.ID))
+	addWishlistMembership(t, shared.ID, group.ID)
+	wish := createTestWish(t, owner.ID, shared.ID)
+	wishTestSeedClaim(t, wish.ID, claimant.ID)
+
+	body := `{"name":"Outsider list","expires":false}`
+	code, resp := wlDo(RegisterWishlist, "POST", "/api/auth/wishlists?groupContextID="+group.ID.String(), body, authHeader(t, outsider.ID, false), nil)
+	if code != 400 {
+		t.Fatalf("status = %d, want 400 for a non-member; body=%v", code, resp)
+	}
+	if raw, _ := json.Marshal(resp); strings.Contains(string(raw), shared.Name) || strings.Contains(string(raw), claimant.ID.String()) {
+		t.Errorf("the refusal carries the group's lists: %s", raw)
+	}
+	if owned, err := database.GetOwnedWishlists(outsider.ID); err != nil || len(owned) != 0 {
+		t.Errorf("the outsider's list was created anyway (%d lists, err=%v)", len(owned), err)
+	}
+}
+
 func TestRegisterWishlistBadGroupContextID(t *testing.T) {
 	setupControllersDB(t)
 	owner := createTestUser(t)
@@ -1440,6 +1467,7 @@ func TestRegisterWishlistGroupContextListDBFailure(t *testing.T) {
 	setupControllersDB(t)
 	owner := createTestUser(t)
 	group := createTestGroup(t, owner.ID)
+	addGroupMembership(t, group.ID, owner.ID)
 	// First wishlists query is the unique-name check; the second is the
 	// group-context re-list.
 	failDBOperation(t, "query", "wishlists", 1)
