@@ -100,7 +100,7 @@ func sharingResult(wishlistID, userID uuid.UUID) (*mcp.CallToolResult, any, erro
 }
 
 func registerSharingTools(server *mcp.Server) {
-	no, yes := false, true
+	yes := true
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_wishlist_sharing",
@@ -112,7 +112,7 @@ func registerSharingTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "attach_wishlist_to_group",
 		Description: "Share a wishlist you own with a group you belong to, so its members can see it (and claim its wishes if it is claimable). Returns the wishlist's sharing.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: &no},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: &yes},
 	}, attachWishlistToGroup)
 
 	mcp.AddTool(server, &mcp.Tool{
