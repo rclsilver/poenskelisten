@@ -131,18 +131,24 @@ func GetActiveRecoveryCodes(userID uuid.UUID) ([]models.MFARecoveryCode, error) 
 	return codes, nil
 }
 
-// MarkRecoveryCodeUsed marks a single recovery code as consumed.
+// ErrRecoveryCodeUsed means the recovery code was used, by another sign-in,
+// after it was looked up.
+var ErrRecoveryCodeUsed = errors.New("recovery code already used")
+
+// MarkRecoveryCodeUsed consumes an unused recovery code. Only one of two
+// sign-ins sending the same code at once gets it; the other gets
+// ErrRecoveryCodeUsed.
 func MarkRecoveryCodeUsed(codeID uuid.UUID) error {
 	now := time.Now()
 	record := Instance.
 		Model(&models.MFARecoveryCode{}).
-		Where("id = ?", codeID).
+		Where("id = ? AND used_at IS NULL", codeID).
 		Update("used_at", now)
 	if record.Error != nil {
 		return record.Error
 	}
 	if record.RowsAffected != 1 {
-		return errors.New("recovery code not marked as used")
+		return ErrRecoveryCodeUsed
 	}
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"aunefyren/poenskelisten/models"
+
 	"github.com/google/uuid"
 )
 
@@ -89,6 +91,15 @@ func TestRecoveryCodeStoreConsumeAndClear(t *testing.T) {
 	}
 	if len(active) != len(hashes)-1 {
 		t.Errorf("got %d active codes after consume, want %d", len(active), len(hashes)-1)
+	}
+
+	// A code already used can't be consumed again.
+	var codes []models.MFARecoveryCode
+	if err := Instance.Where("user_id = ? AND used_at IS NOT NULL", user.ID).Find(&codes).Error; err != nil || len(codes) != 1 {
+		t.Fatalf("used codes = %d (err %v), want 1", len(codes), err)
+	}
+	if err := MarkRecoveryCodeUsed(codes[0].ID); !errors.Is(err, ErrRecoveryCodeUsed) {
+		t.Errorf("second consume err = %v, want ErrRecoveryCodeUsed", err)
 	}
 }
 

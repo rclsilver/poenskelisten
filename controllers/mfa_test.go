@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
+	"gorm.io/gorm"
 )
 
 // enableTOTPEncryption installs a private key so utilities.EncryptString/
@@ -734,6 +735,38 @@ func TestVerifySecondFactorRecoveryCodeLookupFails(t *testing.T) {
 	ok, err := verifySecondFactor(user, "ABCDEFGHIJKLMNOP")
 	if err == nil || ok {
 		t.Errorf("verifySecondFactor = (%v, %v), want (false, error) when recovery codes can't be loaded", ok, err)
+	}
+}
+
+// Two sign-ins sending the same recovery code at once both found it unused
+// and both got in. Here the other sign-in uses it between this one's check
+// and its consumption.
+func TestVerifySecondFactorRecoveryCodeUsedByARace(t *testing.T) {
+	setupControllersDB(t)
+	enableTOTPEncryption(t)
+	mfaKeepRecoveryCodesSetting(t)
+	user := createTestUser(t)
+	_, recoveryCodes := activateTestUser(t, user.ID)
+	if len(recoveryCodes) == 0 {
+		t.Fatal("expected recovery codes")
+	}
+
+	raced := false
+	err := database.Instance.Callback().Update().Before("gorm:begin_transaction").Register("test:rival-sign-in", func(db *gorm.DB) {
+		if raced || db.Statement.Table != "mfa_recovery_codes" {
+			return
+		}
+		raced = true
+		if err := db.Session(&gorm.Session{NewDB: true}).Model(&models.MFARecoveryCode{}).Where("user_id = ?", user.ID).Update("used_at", time.Now()).Error; err != nil {
+			t.Errorf("failed to use the code first: %v", err)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, err := verifySecondFactor(user, recoveryCodes[0]); ok || err != nil {
+		t.Errorf("verifySecondFactor = (%v, %v), want (false, nil) for a code used meanwhile", ok, err)
 	}
 }
 

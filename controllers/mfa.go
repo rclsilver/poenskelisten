@@ -8,6 +8,7 @@ import (
 	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
 	"aunefyren/poenskelisten/utilities"
+	"errors"
 	"net/http"
 	"time"
 
@@ -60,7 +61,9 @@ func verifySecondFactor(user models.User, code string) (bool, error) {
 	}
 	for _, recoveryCode := range activeCodes {
 		if utilities.CheckRecoveryCode(recoveryCode.CodeHash, code) {
-			if err := database.MarkRecoveryCodeUsed(recoveryCode.ID); err != nil {
+			if err := database.MarkRecoveryCodeUsed(recoveryCode.ID); errors.Is(err, database.ErrRecoveryCodeUsed) {
+				return false, nil
+			} else if err != nil {
 				return false, err
 			}
 			return true, nil
