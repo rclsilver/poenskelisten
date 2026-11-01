@@ -51,13 +51,13 @@ func reachableUser(userID, otherID uuid.UUID) (models.User, error) {
 }
 
 func registerCollaboratorTools(server *mcp.Server) {
-	no, yes := false, true
+	yes := true
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "add_collaborator",
 		Description: "Make someone a collaborator on a wishlist you own: they can then edit it and its wishes, and never see who claimed what. " +
 			"They must be in a group with you (user_id from list_group_members). Returns the wishlist's sharing.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: &no},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: &yes},
 	}, addWishlistCollaborator)
 
 	mcp.AddTool(server, &mcp.Tool{
