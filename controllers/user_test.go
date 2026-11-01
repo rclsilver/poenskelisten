@@ -1106,8 +1106,8 @@ func TestUpdateUserProfileImageFailure(t *testing.T) {
 	header := map[string]string{"Authorization": authHeader(t, user.ID, false)}
 	body := `{"email":"` + *user.Email + `","password_original":"CorrectHorse1!","profile_image":"not-valid-base64-image-data"}`
 	code, resp, _ := doRequest(UpdateUser, "PUT", "/api/auth/users", body, header, nil)
-	if code != 500 {
-		t.Fatalf("status = %d, want 500 for an unparseable profile image; body=%v", code, resp)
+	if code != 400 {
+		t.Fatalf("status = %d, want 400 for an unparseable profile image; body=%v", code, resp)
 	}
 }
 

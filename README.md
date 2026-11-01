@@ -160,6 +160,12 @@ Password and code checks are rate-limited per visitor address (IPv6 addresses ar
 
 Write a limit as `<requests>/<duration>` (durations like `30s`, `15m`, `1h`), or `off` to turn it off. The counters live in memory and start over on a restart. Behind a reverse proxy, set [`trustedproxies`](#behind-a-reverse-proxy) first, or all your visitors share one budget.
 
+### Images and memory
+
+Uploaded images (JPG or PNG, up to 10 MB) can have at most 4 megapixels, such as 2000x2000; the web app scales larger photos down before sending them. They are stored at most 1000x1000, with a 250x250 thumbnail. Decoding one still takes tens of megabytes for a moment, so at most two are processed at a time.
+
+In a container with a memory limit, set the `GOMEMLIMIT` environment variable a little below it, for example `GOMEMLIMIT=400MiB` for a 512 MiB limit. Go then collects garbage harder as it nears that amount, rather than letting the container be killed for running out of memory.
+
 ---
 
 ## 🔐 Single sign-on (OpenID Connect)

@@ -9,6 +9,7 @@ import (
 	"aunefyren/poenskelisten/utilities"
 	"errors"
 	"fmt"
+	"image"
 	"net/http"
 	"net/url"
 	"sort"
@@ -404,6 +405,18 @@ func RegisterWish(context *gin.Context) {
 		return
 	}
 
+	// Decoded before anything is written, so a refused image leaves no wish
+	// behind.
+	var wishImage image.Image
+	if wish.Image != "" {
+		wishImage, err = decodeImageUpload(wish.Image)
+		if err != nil {
+			context.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			context.Abort()
+			return
+		}
+	}
+
 	// Resolve the requested category (existing, inline-new, or none)
 	categoryID, categoryUserError, err := ResolveWishCategoryForWish(wishlist_id_int, UserID, wish.CategoryID, wish.CategoryName)
 	if err != nil {
@@ -436,8 +449,8 @@ func RegisterWish(context *gin.Context) {
 	}
 
 	// Save image
-	if wish.Image != "" {
-		err = SaveWishImage(db_wish.ID, wish.Image)
+	if wishImage != nil {
+		err = storeImage(wishImageDir, db_wish.ID, wishImage)
 		if err != nil {
 			logger.Log.Error("Failed to save wish image. Error: " + err.Error())
 			context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save wish image."})
@@ -1108,6 +1121,16 @@ func APIUpdateWish(context *gin.Context) {
 		wishOriginal.Price = wish.Price
 	}
 
+	var wishImage image.Image
+	if wish.Image != "" && !wish.ImageDelete {
+		wishImage, err = decodeImageUpload(wish.Image)
+		if err != nil {
+			context.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			context.Abort()
+			return
+		}
+	}
+
 	// Resolve the requested category (existing, inline-new, or none) and remember
 	// the previous one so it can be cleaned up if it ends up empty.
 	previousCategoryID := wishOriginal.CategoryID
@@ -1125,8 +1148,8 @@ func APIUpdateWish(context *gin.Context) {
 	wishOriginal.CategoryID = categoryID
 
 	// Save image
-	if wish.Image != "" && !wish.ImageDelete {
-		err = SaveWishImage(wishID, wish.Image)
+	if wishImage != nil {
+		err = storeImage(wishImageDir, wishID, wishImage)
 		if err != nil {
 			logger.Log.Error("Failed to save wish image. Error: " + err.Error())
 			context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save wish image."})

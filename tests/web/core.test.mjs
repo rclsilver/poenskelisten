@@ -110,6 +110,21 @@ test("image checks accept JPEG and PNG up to 10 MB", () => {
     assert.ok(!P.isImageDataUrl("javascript:alert(1)"));
 });
 
+test("large images are scaled down to the server's pixel limit", () => {
+    const { P } = loadCore();
+    const fit = (width, height) => {
+        const size = P.fitImageSize(width, height, P.MAX_IMAGE_PIXELS);
+        return [size.width, size.height];
+    };
+    assert.deepEqual(fit(1000, 800), [1000, 800]);
+    assert.deepEqual(fit(2000, 2000), [2000, 2000]);
+    for (const [width, height] of [[4032, 3024], [8064, 6048], [7000, 7000], [12000, 400]]) {
+        const [w, h] = fit(width, height);
+        assert.ok(w * h <= P.MAX_IMAGE_PIXELS && w * h > P.MAX_IMAGE_PIXELS * 0.99, `${width}x${height} -> ${w}x${h}`);
+        assert.ok(Math.abs((w / h) / (width / height) - 1) < 0.01, `${width}x${height} -> ${w}x${h}`);
+    }
+});
+
 test("fmtPrice follows the currency settings and hides empty prices", () => {
     const { P } = loadCore();
     P.setDictionary("en", {});

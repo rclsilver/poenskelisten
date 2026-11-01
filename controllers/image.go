@@ -34,12 +34,18 @@ const (
 	maxThumbnailWidth  = 250
 	maxThumbnailHeight = 250
 	maxUploadBytes     = 10_000_000
-	// Caps the decoded size of an upload. The byte limit alone doesn't bound
-	// memory: a small, highly compressible PNG can declare enormous dimensions.
-	// 50 MP covers any current phone camera's default output.
-	maxUploadPixels = 50_000_000
+	// Caps the decoded size of an image, read from its header before decoding.
+	// The byte limit alone doesn't bound memory: a PNG of a few hundred
+	// kilobytes can declare 7000x7000 pixels, and decoding takes 4 to 12
+	// bytes per pixel before resizing copies it again. 4 MP is four times
+	// what is stored; the web app scales larger photos down before sending.
+	maxUploadPixels = 4_000_000
 	jpegQuality     = 85
 )
+
+// imageWorkers bounds how many images are decoded and resized at once, since
+// each can still take tens of megabytes.
+var imageWorkers = make(chan struct{}, 2)
 
 // imageFilePath is the only place image paths are built. It takes a parsed
 // UUID rather than the raw route param, so user input never reaches the
@@ -244,6 +250,13 @@ func loadStoredImage(dir string, id uuid.UUID, thumbnail bool) ([]byte, bool, er
 	if !thumbnail && !oversized {
 		return fullBytes, true, nil
 	}
+	// Too large to decode safely: serve it as it is, even as a thumbnail.
+	if int64(config.Width)*int64(config.Height) > maxUploadPixels {
+		return fullBytes, true, nil
+	}
+
+	imageWorkers <- struct{}{}
+	defer func() { <-imageWorkers }()
 
 	original, _, err := image.Decode(bytes.NewReader(fullBytes))
 	if err != nil {
@@ -387,8 +400,11 @@ func decodeUploadedImage(imageBytes []byte, mimeType string) (image.Image, error
 		return nil, errors.New("Failed to create image from byte array.")
 	}
 	if int64(config.Width)*int64(config.Height) > maxUploadPixels {
-		return nil, errors.New("Image dimensions are too large.")
+		return nil, errors.New("Image dimensions are too large: at most 4 megapixels, such as 2000x2000.")
 	}
+
+	imageWorkers <- struct{}{}
+	defer func() { <-imageWorkers }()
 
 	imageObject, err := decode(imageBytes)
 	if err != nil {
@@ -403,34 +419,45 @@ func decodeUploadedImage(imageBytes []byte, mimeType string) (image.Image, error
 	return flattenOnWhite(imageObject), nil
 }
 
-// storeUploadedImage validates a base64 data-URI upload and stores it as a
-// full-size and a thumbnail JPEG, so serving never has to resize.
-func storeUploadedImage(dir string, id uuid.UUID, base64String string) error {
+// decodeImageUpload checks and decodes a base64 data-URI upload. Its errors
+// are worded for the user.
+func decodeImageUpload(base64String string) (image.Image, error) {
 	imageBytes, mimeType, err := Base64ToImageBytes(base64String)
 	if err != nil {
 		logger.Log.Error("Failed to convert Base64 String to bytes. Error: " + err.Error())
-		return errors.New("Invalid Base64 string.")
+		return nil, errors.New("Invalid Base64 string.")
 	}
 
 	if len(imageBytes) > maxUploadBytes {
-		return errors.New("Image is too large.")
+		return nil, errors.New("Image is too large.")
 	}
 
-	imageObject, err := decodeUploadedImage(imageBytes, mimeType)
+	return decodeUploadedImage(imageBytes, mimeType)
+}
+
+// storeUploadedImage validates a base64 data-URI upload and stores it as a
+// full-size and a thumbnail JPEG, so serving never has to resize.
+func storeUploadedImage(dir string, id uuid.UUID, base64String string) error {
+	imageObject, err := decodeImageUpload(base64String)
 	if err != nil {
 		return err
 	}
+	return storeImage(dir, id, imageObject)
+}
 
-	err = writeImageVariants(dir, id, imageObject)
+func storeImage(dir string, id uuid.UUID, img image.Image) error {
+	err := writeImageVariants(dir, id, img)
 	if err != nil {
 		logger.Log.Error("Failed to save image to disk. Returning. Error: " + err.Error())
 		return errors.New("Failed to save image to disk.")
 	}
-
 	return nil
 }
 
 func writeImageVariants(dir string, id uuid.UUID, img image.Image) error {
+	imageWorkers <- struct{}{}
+	defer func() { <-imageWorkers }()
+
 	fullBytes, err := encodeJPEG(fitWithin(img, maxImageWidth, maxImageHeight))
 	if err != nil {
 		return err
@@ -498,10 +525,6 @@ func deleteImageFiles(dir string, id uuid.UUID) error {
 	return nil
 }
 
-func UpdateUserProfileImage(userID uuid.UUID, base64String string) error {
-	return storeUploadedImage(profileImageDir, userID, base64String)
-}
-
 func DeleteUserProfileImage(userID uuid.UUID) error {
 	err := deleteImageFiles(profileImageDir, userID)
 	if err != nil {
@@ -509,10 +532,6 @@ func DeleteUserProfileImage(userID uuid.UUID) error {
 		return errors.New("Failed to delete profile image.")
 	}
 	return nil
-}
-
-func SaveWishImage(wishID uuid.UUID, base64String string) error {
-	return storeUploadedImage(wishImageDir, wishID, base64String)
 }
 
 func DeleteWishImage(wishID uuid.UUID) error {
