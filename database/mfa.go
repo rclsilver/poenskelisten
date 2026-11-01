@@ -64,10 +64,11 @@ func DisableUserMFA(userID uuid.UUID) error {
 		Model(&models.User{}).
 		Where("id = ? AND enabled = ?", userID, true).
 		Updates(map[string]interface{}{
-			"mfa_secret":      nil,
-			"mfa_enabled":     false,
-			"mfa_enrolled_at": nil,
-			"mfa_last_step":   nil,
+			"mfa_secret":       nil,
+			"mfa_enabled":      false,
+			"mfa_enrolled_at":  nil,
+			"mfa_last_step":    nil,
+			"mfa_challenge_id": nil,
 		})
 	if record.Error != nil {
 		return record.Error
@@ -179,6 +180,35 @@ func UseTOTPStep(userID uuid.UUID, step int64) (bool, error) {
 		Model(&models.User{}).
 		Where("id = ? AND (mfa_last_step IS NULL OR mfa_last_step < ?)", userID, step).
 		Update("mfa_last_step", step)
+	if record.Error != nil {
+		return false, record.Error
+	}
+	return record.RowsAffected == 1, nil
+}
+
+// SetMFAChallenge records the challenge a password sign-in was given. It
+// replaces any earlier one: only the latest sign-in can be completed.
+func SetMFAChallenge(userID uuid.UUID, challengeID uuid.UUID) error {
+	record := Instance.
+		Model(&models.User{}).
+		Where("id = ? AND enabled = ?", userID, true).
+		Update("mfa_challenge_id", challengeID)
+	if record.Error != nil {
+		return record.Error
+	}
+	if record.RowsAffected != 1 {
+		return errors.New("MFA challenge not stored in database")
+	}
+	return nil
+}
+
+// ConsumeMFAChallenge completes the user's pending challenge if it is the
+// given one, and reports false when it was already completed or replaced.
+func ConsumeMFAChallenge(userID uuid.UUID, challengeID uuid.UUID) (bool, error) {
+	record := Instance.
+		Model(&models.User{}).
+		Where("id = ? AND mfa_challenge_id = ?", userID, challengeID).
+		Update("mfa_challenge_id", nil)
 	if record.Error != nil {
 		return false, record.Error
 	}

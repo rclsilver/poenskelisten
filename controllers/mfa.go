@@ -324,7 +324,7 @@ func APIValidateMFA(context *gin.Context) {
 		return
 	}
 
-	userID, err := auth.ValidateMFAChallengeToken(request.MFAToken)
+	userID, challengeID, err := auth.ValidateMFAChallengeToken(request.MFAToken)
 	if err != nil {
 		logger.Log.Error("Failed to validate MFA challenge token. Error: " + err.Error())
 		context.JSON(http.StatusUnauthorized, gin.H{"error": "Your login attempt expired. Please log in again."})
@@ -356,6 +356,14 @@ func APIValidateMFA(context *gin.Context) {
 		return
 	}
 
+	// A challenge serves once: completed, or replaced by a newer sign-in, it
+	// can't be completed again.
+	if user.MFAChallengeID == nil || *user.MFAChallengeID != challengeID {
+		context.JSON(http.StatusUnauthorized, gin.H{"error": "Your login attempt expired. Please log in again."})
+		context.Abort()
+		return
+	}
+
 	verified, err := verifySecondFactor(user, request.Code)
 	if err != nil {
 		logger.Log.Error("Failed to verify second factor. Error: " + err.Error())
@@ -370,6 +378,20 @@ func APIValidateMFA(context *gin.Context) {
 		return
 	}
 	signInAttempts.Succeeded(attemptKey)
+
+	// Claimed atomically, so two requests completing the same challenge at
+	// once don't both get a session.
+	consumed, err := database.ConsumeMFAChallenge(userID, challengeID)
+	if err != nil {
+		logger.Log.Error("Failed to complete the MFA challenge. Error: " + err.Error())
+		context.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log in."})
+		context.Abort()
+		return
+	} else if !consumed {
+		context.JSON(http.StatusUnauthorized, gin.H{"error": "Your login attempt expired. Please log in again."})
+		context.Abort()
+		return
+	}
 
 	if err := issueSSOSession(context, user); err != nil {
 		logger.Log.Error("Failed to issue session after MFA. Error: " + err.Error())

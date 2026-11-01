@@ -159,6 +159,15 @@ func mfaTestUserWithPassword(t *testing.T, plaintext string) models.User {
 	return updated
 }
 
+// mfaTestChallenge issues a challenge token the way a password sign-in does.
+func mfaTestChallenge(userID uuid.UUID) (string, error) {
+	token, challengeID, err := auth.GenerateMFAChallengeToken(userID)
+	if err != nil {
+		return "", err
+	}
+	return token, database.SetMFAChallenge(userID, challengeID)
+}
+
 func totpCodeFor(t *testing.T, secret string) string {
 	t.Helper()
 	return totpCodeAt(t, secret, time.Now())
@@ -390,7 +399,7 @@ func TestValidateMFASuccess(t *testing.T) {
 	user := mfaTestUserWithPassword(t, "correct horse battery staple")
 	secret, _ := activateTestUser(t, user.ID)
 
-	challenge, err := auth.GenerateMFAChallengeToken(user.ID)
+	challenge, err := mfaTestChallenge(user.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -427,7 +436,7 @@ func TestValidateMFARecoveryCodeConsumed(t *testing.T) {
 	}
 	recoveryCode := recoveryCodes[0]
 
-	challenge, err := auth.GenerateMFAChallengeToken(user.ID)
+	challenge, err := mfaTestChallenge(user.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -438,7 +447,7 @@ func TestValidateMFARecoveryCodeConsumed(t *testing.T) {
 	}
 
 	// The same recovery code must not work twice.
-	challenge2, err := auth.GenerateMFAChallengeToken(user.ID)
+	challenge2, err := mfaTestChallenge(user.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -465,7 +474,7 @@ func TestValidateMFAWrongCode(t *testing.T) {
 	user := mfaTestUserWithPassword(t, "correct horse battery staple")
 	activateTestUser(t, user.ID)
 
-	challenge, err := auth.GenerateMFAChallengeToken(user.ID)
+	challenge, err := mfaTestChallenge(user.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -481,7 +490,7 @@ func TestValidateMFANotEnabled(t *testing.T) {
 	enableTOTPEncryption(t)
 	user := createTestUser(t)
 
-	challenge, err := auth.GenerateMFAChallengeToken(user.ID)
+	challenge, err := mfaTestChallenge(user.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -628,7 +637,7 @@ func TestValidateMFAUserNotFound(t *testing.T) {
 	enableTOTPEncryption(t)
 
 	// A well-formed challenge token for a user ID that was never created in the DB.
-	challenge, err := auth.GenerateMFAChallengeToken(uuid.New())
+	challenge, _, err := auth.GenerateMFAChallengeToken(uuid.New())
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -899,7 +908,7 @@ func TestValidateMFACorruptSecret(t *testing.T) {
 	enableTOTPEncryption(t)
 	user := mfaUserWithCorruptSecret(t, "correct horse battery staple", true)
 
-	challenge, err := auth.GenerateMFAChallengeToken(user.ID)
+	challenge, err := mfaTestChallenge(user.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -912,7 +921,7 @@ func TestValidateMFACorruptSecret(t *testing.T) {
 
 func postValidateMFA(t *testing.T, userID models.User, code string) int {
 	t.Helper()
-	challenge, err := auth.GenerateMFAChallengeToken(userID.ID)
+	challenge, err := mfaTestChallenge(userID.ID)
 	if err != nil {
 		t.Fatalf("failed to generate challenge token: %v", err)
 	}
@@ -951,6 +960,43 @@ func TestTOTPCodesWorkOnce(t *testing.T) {
 	}
 	if code := postValidateMFA(t, user, totpCodeAt(t, secret, time.Now().Add(30*time.Second))); code != 200 {
 		t.Errorf("the next code = %d, want 200", code)
+	}
+}
+
+// The token a password sign-in gets for the MFA step serves once: replayed
+// with another valid code, it gets no second session. A newer sign-in
+// replaces it as well.
+func TestMFAChallengeWorksOnce(t *testing.T) {
+	setupControllersDB(t)
+	enableTOTPEncryption(t)
+	user := mfaTestUserWithPassword(t, "correct horse battery staple")
+	secret, _ := activateTestUser(t, user.ID)
+	signIn := func() string {
+		t.Helper()
+		code, body := postGenerateToken(`{"email":"` + *user.Email + `","password":"correct horse battery staple"}`)
+		token, _ := body["mfa_token"].(string)
+		if code != 200 || token == "" {
+			t.Fatalf("password sign-in = %d %v, want an mfa_token", code, body)
+		}
+		return token
+	}
+	complete := func(challenge string, at time.Time) int {
+		t.Helper()
+		body := `{"mfa_token":"` + challenge + `","code":"` + totpCodeAt(t, secret, at) + `"}`
+		code, _ := runJSONHandler(APIValidateMFA, "POST", "/api/open/tokens/mfa", body, nil, nil)
+		return code
+	}
+
+	replaced := signIn()
+	latest := signIn()
+	if code := complete(replaced, time.Now()); code != 401 {
+		t.Errorf("a replaced challenge = %d, want 401", code)
+	}
+	if code := complete(latest, time.Now()); code != 200 {
+		t.Fatalf("the latest challenge = %d, want 200", code)
+	}
+	if code := complete(latest, time.Now().Add(30*time.Second)); code != 401 {
+		t.Errorf("a completed challenge with a new code = %d, want 401", code)
 	}
 }
 
