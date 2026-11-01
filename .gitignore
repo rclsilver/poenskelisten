@@ -3,3 +3,11 @@
 poenskelisten
 poenskelisten.exe
 /.claude/worktrees/
+# Database dumps, databases and environment files hold users' data and
+# secrets, and stay in the history once committed.
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
