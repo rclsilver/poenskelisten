@@ -717,7 +717,13 @@ func RegisterWishClaim(context *gin.Context) {
 		return
 	}
 
-	if !WishlistOwnership && !WishlistMembership {
+	// The owner is refused before the claim is looked at, so the answer says
+	// nothing about it; being in one of the list's groups doesn't change that.
+	if WishlistOwnership {
+		context.JSON(http.StatusBadRequest, gin.H{"error": "You cannot claim wishes on your own wishlist."})
+		context.Abort()
+		return
+	} else if !WishlistMembership {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "You are not a member of, or an owner of this wishlist group."})
 		context.Abort()
 		return

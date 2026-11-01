@@ -44,10 +44,9 @@ func registerClaimTools(server *mcp.Server) {
 
 // claimableWish loads a live wish the caller may claim or unclaim on, with the
 // web app's rules (RegisterWishClaim / RemoveWishClaim): the wishlist must be
-// claimable and the caller a group member of it. The web app also lets the
-// wishlist's owner through its API, but its UI never offers it and the claim
-// would spoil the surprise, so the MCP refuses. Callers who can't see the wish
-// get errNoWish, as for the other wish tools.
+// claimable and the caller a group member of it, neither its owner nor a
+// collaborator, since a claim would spoil their surprise. Callers who can't
+// see the wish get errNoWish, as for the other wish tools.
 func claimableWish(userID, wishID uuid.UUID) (models.Wish, error) {
 	wish, err := database.GetWishByWishID(wishID)
 	if err != nil {

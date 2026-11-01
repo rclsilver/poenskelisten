@@ -1240,21 +1240,37 @@ func TestRegisterWishClaim_WishNotFound(t *testing.T) {
 	}
 }
 
-func TestRegisterWishClaim_OwnerCanClaimOthersWish(t *testing.T) {
+// The owner can't claim on their own wishlist, even a collaborator's wish and
+// even as a member of a group the list is shared with. They get the same
+// answer whether or not the wish is claimed, so it tells them nothing.
+func TestRegisterWishClaim_OwnerRefusedWhateverTheClaim(t *testing.T) {
 	setupControllersDB(t)
-	owner := createTestUser(t)
-	contributor := createTestUser(t)
-	wishlist := createTestWishlist(t, owner.ID)
-	wishlist = makeClaimable(t, wishlist)
-	// A wish added by someone else (e.g. via a group) on the owner's own wishlist.
-	wish := createTestWish(t, contributor.ID, wishlist.ID)
+	owner, claimant, wishlist, _ := claimSetup(t)
+	collaborator := createTestUser(t)
+	addWishCollaborator(t, wishlist.ID, collaborator.ID)
+	group := createTestGroup(t, owner.ID)
+	addGroupMembership(t, group.ID, owner.ID)
+	addWishlistMembership(t, wishlist.ID, group.ID)
+	free := createTestWish(t, collaborator.ID, wishlist.ID)
+	claimed := createTestWish(t, collaborator.ID, wishlist.ID)
+	wishTestSeedClaim(t, claimed.ID, claimant.ID)
 
-	w, ctx := wishCtx("POST", "/api/wishes/"+wish.ID.String()+"/claim", `{}`)
-	ctx.Params = gin.Params{{Key: "wish_id", Value: wish.ID.String()}}
-	ctx.Request.Header.Set("Authorization", authHeader(t, owner.ID, false))
-	RegisterWishClaim(ctx)
-	if w.Code != 201 {
-		t.Fatalf("status = %d, want 201 (wishlist owner claiming another user's wish); body=%s", w.Code, w.Body.String())
+	bodies := []string{}
+	for _, wish := range []models.Wish{free, claimed} {
+		w, ctx := wishCtx("POST", "/api/wishes/"+wish.ID.String()+"/claim", `{}`)
+		ctx.Params = gin.Params{{Key: "wish_id", Value: wish.ID.String()}}
+		ctx.Request.Header.Set("Authorization", authHeader(t, owner.ID, false))
+		RegisterWishClaim(ctx)
+		if w.Code != 400 {
+			t.Fatalf("status = %d, want 400 for the wishlist owner; body=%s", w.Code, w.Body.String())
+		}
+		bodies = append(bodies, w.Body.String())
+	}
+	if bodies[0] != bodies[1] {
+		t.Errorf("answers differ between a free and a claimed wish: %s / %s", bodies[0], bodies[1])
+	}
+	if mine, err := database.VerifyUserOwnershipToWishClaimByWish(owner.ID, free.ID); err != nil || mine {
+		t.Errorf("the owner's claim was stored (mine=%v, err=%v)", mine, err)
 	}
 }
 
