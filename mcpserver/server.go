@@ -86,9 +86,12 @@ type groupOut struct {
 func Handler(uploads *middlewares.UploadBudget) gin.HandlerFunc {
 	server := buildServer(uploads)
 
+	// The SDK reads 4 MiB of a request at most by default, less than an image
+	// the tools take; MaxBodyBytes has already held the request to the app's
+	// own limit.
 	streamable := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return server },
-		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: middlewares.ImageUploadMaxBodyBytes},
 	)
 
 	protected := mcpauth.RequireBearerToken(verifyToken, &mcpauth.RequireBearerTokenOptions{
