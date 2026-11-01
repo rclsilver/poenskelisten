@@ -966,8 +966,8 @@ func TestConvertWishToWishObject_HideClaimersAnonymizes(t *testing.T) {
 		t.Fatalf("failed to seed claim: %v", err)
 	}
 
-	// A stranger (not owner) still sees the claim exists, but claimer identity
-	// should be anonymized when hide_claimers is on.
+	// A stranger (not owner) still sees the claim exists, but not who made
+	// it: not even the claimer's ID, which the group's member list resolves.
 	stranger := createTestUser(t)
 	wishObject, err := ConvertWishToWishObject(wish, &stranger.ID)
 	if err != nil {
@@ -976,8 +976,17 @@ func TestConvertWishToWishObject_HideClaimersAnonymizes(t *testing.T) {
 	if len(wishObject.WishClaim) != 1 {
 		t.Fatalf("expected 1 claim, got %v", wishObject.WishClaim)
 	}
-	if wishObject.WishClaim[0].User.FirstName != "Hidden" {
-		t.Errorf("FirstName = %q, want Hidden", wishObject.WishClaim[0].User.FirstName)
+	if user := wishObject.WishClaim[0].User; user.FirstName != "Hidden" || user.ID != uuid.Nil || user.Email != nil {
+		t.Errorf("claimer = %+v, want an anonymous Hidden User", user)
+	}
+
+	// The claimer still recognises their own claim.
+	wishObject, err = ConvertWishToWishObject(wish, &claimant.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(wishObject.WishClaim) != 1 || wishObject.WishClaim[0].User.ID != claimant.ID || wishObject.WishClaim[0].User.FirstName != "Hidden" {
+		t.Errorf("claimer's own view = %+v, want their ID under the hidden name", wishObject.WishClaim)
 	}
 }
 

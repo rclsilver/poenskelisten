@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -194,18 +193,17 @@ func ConvertWishToWishObject(wish models.Wish, requestUserID *uuid.UUID) (models
 		}
 	}
 
-	// Purge claim details if claimers are hidden
-	if wishlist.HideClaimers != nil && *wishlist.HideClaimers == true {
-		newClaimers := []models.WishClaimObject{}
-		for _, wishClaim := range wishClaimObject {
-			wishClaim.User.CreatedAt = time.Now()
-			wishClaim.User.UpdatedAt = time.Now()
-			wishClaim.User.Email = nil
-			wishClaim.User.FirstName = "Hidden"
-			wishClaim.User.LastName = "User"
-			newClaimers = append(newClaimers, wishClaim)
+	// With hidden claimers, others only learn that a wish is claimed: the
+	// claimer's ID would name them through the member list. The claimer keeps
+	// it, so they can tell the claim is theirs.
+	if wishlist.HideClaimers != nil && *wishlist.HideClaimers {
+		for i, wishClaim := range wishClaimObject {
+			hidden := models.UserMinimal{FirstName: "Hidden", LastName: "User"}
+			if requestUserID != nil && wishClaim.User.ID == *requestUserID {
+				hidden.ID = *requestUserID
+			}
+			wishClaimObject[i].User = hidden
 		}
-		wishClaimObject = newClaimers
 	}
 
 	wishObject.CreatedAt = wish.CreatedAt
