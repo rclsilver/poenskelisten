@@ -137,10 +137,9 @@ func getWishlistSharing(ctx context.Context, _ *mcp.CallToolRequest, args wishli
 	return sharingResult(wishlistID, userID)
 }
 
-// attachWishlistToGroup follows controllers.APIAddWishlistsToGroup: only the
-// owner may share a wishlist, and only with a group they belong to. The
-// web's other route for this, JoinWishlist, skips the group check (see
-// docs/wip.md); the MCP never does.
+// attachWishlistToGroup follows controllers.APIAddWishlistsToGroup and
+// JoinWishlist: only the owner may share a wishlist, and only with a group
+// they belong to.
 func attachWishlistToGroup(ctx context.Context, _ *mcp.CallToolRequest, args wishlistGroupArgs) (*mcp.CallToolResult, any, error) {
 	userID, err := requireScope(ctx, scopeWishlistsWrite)
 	if err != nil {
