@@ -103,7 +103,7 @@ func parseDate(value string) (time.Time, error) {
 }
 
 func parseID(label, value string) (uuid.UUID, error) {
-	id, err := uuid.Parse(strings.TrimSpace(value))
+	id, err := utilities.ParseID(strings.TrimSpace(value))
 	if err != nil {
 		return uuid.Nil, userError("invalid " + label)
 	}

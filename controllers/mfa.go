@@ -375,7 +375,7 @@ func APIAdminDeleteUserMFA(context *gin.Context) {
 		return
 	}
 
-	targetID, err := uuid.Parse(userIDString)
+	targetID, err := utilities.ParseID(userIDString)
 	if err != nil {
 		logger.Log.Error("Failed to parse user ID. Error: " + err.Error())
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse user ID."})

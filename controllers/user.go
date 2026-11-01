@@ -236,7 +236,7 @@ func GetUser(context *gin.Context) {
 		return
 	}
 
-	targetID, err := uuid.Parse(context.Param("user_id"))
+	targetID, err := utilities.ParseID(context.Param("user_id"))
 	if err != nil {
 		logger.Log.Error("Failed to parse user ID. Error: " + err.Error())
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse user ID."})
@@ -314,7 +314,7 @@ func GetUsers(context *gin.Context) {
 	notAMemberOfGroupIDString, notAMemberOfGroupIDOkay := context.GetQuery("notAMemberOfGroupID")
 	if notAMemberOfGroupIDOkay {
 		newUsers := []models.User{}
-		notAMemberOfGroupID, err := uuid.Parse(notAMemberOfGroupIDString)
+		notAMemberOfGroupID, err := utilities.ParseID(notAMemberOfGroupIDString)
 		if err != nil {
 			logger.Log.Error("Failed to parse group ID. Error: " + err.Error())
 			context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse group ID."})
@@ -342,7 +342,7 @@ func GetUsers(context *gin.Context) {
 	notACollaboratorOfWishlistString, notACollaboratorOfWishlistOkay := context.GetQuery("notACollaboratorOfWishlistID")
 	if notACollaboratorOfWishlistOkay {
 		newUsers := []models.User{}
-		notACollaboratorOfWishlistID, err := uuid.Parse(notACollaboratorOfWishlistString)
+		notACollaboratorOfWishlistID, err := utilities.ParseID(notACollaboratorOfWishlistString)
 		if err != nil {
 			logger.Log.Error("Failed to parse wishlist ID. Error: " + err.Error())
 			context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse wishlist ID."})
@@ -920,7 +920,7 @@ func APIDeleteUser(context *gin.Context) {
 	}
 
 	// Parse group id
-	userToDeleteID, err := uuid.Parse(userIDString)
+	userToDeleteID, err := utilities.ParseID(userIDString)
 	if err != nil {
 		logger.Log.Error("Failed to parse user ID. Error: " + err.Error())
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse user ID."})

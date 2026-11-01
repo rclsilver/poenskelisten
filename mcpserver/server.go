@@ -10,6 +10,7 @@ import (
 	"aunefyren/poenskelisten/config"
 	"aunefyren/poenskelisten/controllers"
 	"aunefyren/poenskelisten/database"
+	"aunefyren/poenskelisten/utilities"
 	"context"
 	"encoding/json"
 	"errors"
@@ -190,7 +191,7 @@ func listWishes(ctx context.Context, _ *mcp.CallToolRequest, args listWishesArgs
 		return nil, nil, err
 	}
 
-	wishlistID, err := uuid.Parse(strings.TrimSpace(args.WishlistID))
+	wishlistID, err := utilities.ParseID(strings.TrimSpace(args.WishlistID))
 	if err != nil {
 		return nil, nil, errors.New("invalid wishlist_id")
 	}
@@ -213,7 +214,7 @@ func getPublicWishlist(ctx context.Context, _ *mcp.CallToolRequest, args publicW
 		return nil, nil, err
 	}
 
-	hash, err := uuid.Parse(strings.TrimSpace(args.PublicHash))
+	hash, err := utilities.ParseID(strings.TrimSpace(args.PublicHash))
 	if err != nil {
 		return nil, nil, errors.New("invalid public_hash")
 	}
@@ -327,7 +328,7 @@ func requireScope(ctx context.Context, scope string) (uuid.UUID, error) {
 	if !containsScope(info.Scopes, scope) {
 		return uuid.Nil, fmt.Errorf("missing required scope: %s", scope)
 	}
-	userID, err := uuid.Parse(info.UserID)
+	userID, err := utilities.ParseID(info.UserID)
 	if err != nil {
 		return uuid.Nil, errors.New("invalid token subject")
 	}
