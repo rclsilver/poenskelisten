@@ -513,6 +513,40 @@ func TestUpdateUserWrongOriginalPassword(t *testing.T) {
 	}
 }
 
+// Someone holding a stolen session can guess the password here too: the
+// guesses count against the same per-account budget as the login's.
+func TestUpdateUserWrongOriginalPasswordsLockTheAccount(t *testing.T) {
+	setupControllersDB(t)
+	enablePrivateKey(t)
+	limitSignInAttempts(t, 3)
+	user := newUserWithPassword(t, "CorrectHorse1!")
+	other := newUserWithPassword(t, "CorrectHorse1!")
+	update := func(account models.User, password string) int {
+		header := map[string]string{"Authorization": authHeader(t, account.ID, false)}
+		body := `{"email":"` + *account.Email + `","password_original":"` + password + `"}`
+		code, _, _ := doRequest(UpdateUser, "PUT", "/api/auth/users", body, header, nil)
+		return code
+	}
+
+	postGenerateToken(`{"email":"` + *user.Email + `","password":"wrong"}`)
+	if code := update(user, "WrongPassword!"); code != 401 {
+		t.Fatalf("second wrong password = %d, want 401", code)
+	}
+	if code := update(user, "WrongPassword!"); code != 401 {
+		t.Fatalf("third wrong password = %d, want 401", code)
+	}
+
+	if code := update(user, "CorrectHorse1!"); code != 429 {
+		t.Errorf("right password once locked = %d, want 429", code)
+	}
+	if code, _ := postGenerateToken(`{"email":"` + *user.Email + `","password":"CorrectHorse1!"}`); code != 429 {
+		t.Errorf("login once locked = %d, want 429", code)
+	}
+	if code := update(other, "CorrectHorse1!"); code != 200 {
+		t.Errorf("another account = %d, want 200", code)
+	}
+}
+
 func TestUpdateUserSuccessNameChangeOnly(t *testing.T) {
 	setupControllersDB(t)
 	user := newUserWithPassword(t, "CorrectHorse1!")
