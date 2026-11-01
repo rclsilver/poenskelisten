@@ -4,6 +4,7 @@ go 1.26.10
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/gen2brain/webp v0.6.4
 	github.com/gin-contrib/cors v1.7.11
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-jose/go-jose/v4 v4.1.9
@@ -34,6 +35,7 @@ require (
 	github.com/bytedance/sonic/loader v0.5.3 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.16 // indirect
 	github.com/gin-contrib/sse v1.2.1 // indirect
 	github.com/go-playground/locales v0.14.2 // indirect

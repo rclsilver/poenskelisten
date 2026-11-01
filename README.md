@@ -147,7 +147,7 @@ Pønskelisten keeps its state in `files/` (config, log and, with SQLite, the dat
 
 ### Images and memory
 
-Uploaded images (JPG or PNG, up to 10 MB) are stored scaled down to at most 1000x1000, with a 250x250 thumbnail. Their width and height are read from the file before it is decoded, and an image with more pixels than `max_image_pixels` (default 24 million, such as 6000x4000, which covers 12-megapixel phone photos) is refused.
+Uploaded images (JPG or PNG, up to 10 MB) are stored as lossy WebP, which keeps transparency, scaled down to at most 1000x1000, with a 250x250 thumbnail. Files keep their `.jpg` name, and images stored before the change stay JPEG. Their width and height are read from the file before it is decoded, and an image with more pixels than `max_image_pixels` (default 24 million, such as 6000x4000, which covers 12-megapixel phone photos) is refused.
 
 Decoding an image takes memory in proportion to its pixel count, not its file size, and how much per pixel depends on its format. Before decoding, the memory an image needs is estimated from its header, and one image may take at most what a 16-bit PNG at the pixel limit takes: about 380 MB at the default. For standard JPEGs, most progressive JPEGs and 8-bit PNGs the pixel limit is then the only limit. A few rarer kinds need more memory per pixel and are refused at fewer pixels, with a message suggesting a smaller image or a standard JPEG. At the default that is about 16 MP for a progressive JPEG without chroma subsampling, 15 MP for an interlaced 16-bit PNG and 11 MP for a progressive CMYK JPEG. An image stored by an earlier version that is over these limits is served as it is, without being resized.
 
