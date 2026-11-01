@@ -126,8 +126,8 @@ func TestGetWishlistSharing(t *testing.T) {
 	addCollaborator(t, wishlist.ID, gone.ID)
 	database.Instance.Model(&models.User{}).Where("id = ?", gone.ID).Update("enabled", false)
 	joined := shareWithGroup(t, wishlist.ID, ada.ID)
-	// Ada left this group, but the share stands: she must see it to undo it,
-	// without learning the group's name.
+	// A share with a group Ada isn't in, as left by older versions when she
+	// left it: she must see it to undo it, without learning the group's name.
 	left := shareWithGroup(t, wishlist.ID, carol.ID)
 	database.Instance.Model(&models.Group{}).Where("id = ?", left.ID).Update("name", "Secret circle")
 
