@@ -305,6 +305,21 @@ func TestGenerateTokenSignsInOnlyUnderTheAccountsOwnAddress(t *testing.T) {
 	}
 }
 
+// A failed login keeps its key until the window passes; one typed with a huge
+// e-mail mustn't keep that much memory for it.
+func TestEmailAttemptKeyIsSmall(t *testing.T) {
+	huge := strings.Repeat("a", 1<<20) + "@example.com"
+	if key := emailAttemptKey(huge); len(key) > 100 {
+		t.Errorf("key for a 1 MiB e-mail is %d bytes, want at most 100", len(key))
+	}
+	if emailAttemptKey(" Dave@Example.com ") != emailAttemptKey("dave@example.com") {
+		t.Error("the case and surrounding spaces of an e-mail shouldn't change its key")
+	}
+	if emailAttemptKey("dave@example.com") == emailAttemptKey("erin@example.com") {
+		t.Error("two e-mails shouldn't share a key")
+	}
+}
+
 // An e-mail without an account locks exactly like a real one, so the lock
 // itself doesn't reveal which addresses exist.
 func TestGenerateTokenUnknownEmailLocksTheSameWay(t *testing.T) {

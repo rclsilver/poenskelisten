@@ -7,6 +7,8 @@ import (
 	"aunefyren/poenskelisten/logger"
 	"aunefyren/poenskelisten/middlewares"
 	"aunefyren/poenskelisten/models"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
@@ -39,8 +41,11 @@ func SetSignInAttemptLimit(limit config.RateLimit) {
 	signInAttempts = newSignInAttempts(limit)
 }
 
+// emailAttemptKey is a hash, so a lock costs the same few bytes whatever the
+// size of the e-mail typed: it is kept until the window passes, account or not.
 func emailAttemptKey(email string) string {
-	return "email:" + strings.ToLower(strings.TrimSpace(email))
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return "email:" + hex.EncodeToString(sum[:])
 }
 
 func userAttemptKey(userID uuid.UUID) string {
