@@ -161,7 +161,9 @@ func main() {
 }
 
 func initRouter(configFile models.ConfigStruct) *gin.Engine {
-	router := gin.Default()
+	// Not gin.Default(): its logger writes whole URLs, codes included.
+	router := gin.New()
+	router.Use(middlewares.AccessLog(gin.DefaultWriter), gin.Recovery())
 
 	// Only the configured reverse proxies may set the client address with
 	// X-Forwarded-For or X-Real-IP. Gin trusts every peer by default, which let
