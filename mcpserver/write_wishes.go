@@ -333,8 +333,10 @@ const (
 	maxURLLength  = 2048
 )
 
-// validateWishURL accepts the same URLs as the web app (anything that parses
-// as a URL or as a host name) and refuses overlong ones.
+// validateWishURL accepts only the links the API accepts (an absolute http(s)
+// URL with a host, no spaces or control characters, see
+// controllers.IsValidWishURL) and refuses overlong ones. It also keeps the
+// scheme in lower case, as the MCP always has.
 func validateWishURL(value string) error {
 	if err := validateText("URL", value, maxURLLength); err != nil {
 		return err
@@ -342,10 +344,8 @@ func validateWishURL(value string) error {
 	if value == "" {
 		return nil
 	}
-	// The web app ends up requiring a scheme and a host; the MCP also limits
-	// the scheme to web links since the URL is rendered as a link.
 	u, err := url.ParseRequestURI(value)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || !controllers.IsValidWishURL(value) {
 		return userError("Invalid URL given.")
 	}
 	return nil

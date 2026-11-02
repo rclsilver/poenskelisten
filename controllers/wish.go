@@ -592,6 +592,12 @@ func isValidWishURL(rawURL string) bool {
 	return (scheme == "http" || scheme == "https") && parsed.Host != "" && parsed.Hostname() != ""
 }
 
+// IsValidWishURL holds the MCP tools, which store wish links too, to the same
+// rule as the API.
+func IsValidWishURL(rawURL string) bool {
+	return isValidWishURL(rawURL)
+}
+
 func RegisterWishClaim(context *gin.Context) {
 	// Create wish request
 	var wish_id = context.Param("wish_id")
