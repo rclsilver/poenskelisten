@@ -1,6 +1,7 @@
 // Checks the page width rules of web/css/app.css: the content area does not
 // shrink on very wide screens, wish cards stay between 320 and 460 px wide
-// from tablets up, and the form, sign-in and account pages stay narrow.
+// from tablets up, the form, sign-in and account pages stay narrow, and the
+// header menus stay on screen on phones.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -68,4 +69,17 @@ test("forms, sign-in and account pages stay narrow, card pages use the full widt
     for (const name of ["frontpage", "wishlists", "wishlist", "public", "groups", "group"]) {
         assert.doesNotMatch(body(name), /narrow/, name);
     }
+});
+
+test("on phones the open menus are anchored to the header, not to their button", () => {
+    const start = css.indexOf("@media (max-width: 640px) {");
+    const phone = css.slice(start, css.indexOf("\n}\n", start));
+    assert.match(rule(".appnav"), /position: relative/);
+    assert.match(phone, /\.menu \{ position: static; \}/);
+    const panel = phone.match(/\.menu-panel \{([^}]*)\}/);
+    assert.ok(panel, "no phone rule for .menu-panel");
+    assert.match(panel[1], /top: auto/);
+    assert.match(panel[1], /right: 16px/);
+    assert.match(panel[1], /max-width: calc\(100vw - 32px\)/);
+    assert.match(phone, /\.appnav \{ padding: 12px 16px 8px;/);
 });
