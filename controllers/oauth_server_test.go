@@ -469,6 +469,32 @@ func TestOAuthAuthorizeThirdPartyShowsConsent(t *testing.T) {
 	}
 }
 
+// The pages built by pageShell must use the narrow layout of the web pages,
+// or the stylesheet stretches them to the full content width.
+func TestOAuthPagesUseTheNarrowLayout(t *testing.T) {
+	setupControllersDB(t)
+	oauthServerTestSetup(t)
+	client := oauthServerTestNewClient(t, false, true, []string{"openid"}, "https://client.example/cb")
+	_, challenge := oauthServerTestPKCE()
+
+	consent := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(consent)
+	ctx.Request = httptest.NewRequest("GET", "/oauth/authorize", nil)
+	renderConsentPage(ctx, client, []string{"openid"}, client.RedirectURIs[0], "state", challenge, "")
+
+	wrongAddress := httptest.NewRecorder()
+	ctx, _ = gin.CreateTestContext(wrongAddress)
+	ctx.Request = httptest.NewRequest("GET", "/oauth/authorize", nil)
+	renderOriginNotAllowedPage(ctx, "http://192.168.1.10:8080/oauth/callback")
+
+	for name, w := range map[string]*httptest.ResponseRecorder{"consent": consent, "wrong address": wrongAddress} {
+		page := w.Body.String()
+		if !strings.Contains(page, `<body class="narrow">`) || !strings.Contains(page, `<main class="container">`) {
+			t.Errorf("%s page does not use the narrow layout: %s", name, page)
+		}
+	}
+}
+
 // --- APIOAuthConsent ---
 
 func TestOAuthConsentNotLoggedIn(t *testing.T) {
