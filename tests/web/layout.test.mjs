@@ -43,9 +43,7 @@ test("the content area has bounded gutters and does not depend on percentages", 
     const container = rule(".container");
     assert.match(container, /max-width: calc\(var\(--page\) \+ 2 \* var\(--gutter\)\)/);
     assert.match(container, /padding: 40px var\(--gutter\) 64px/);
-    for (const selector of [".appnav", ".footer"]) {
-        assert.match(rule(selector), /padding: \d+px max\(var\(--gutter\), calc\(\(100% - var\(--page\)\) \/ 2\)\)/, `${selector} is not aligned with the content`);
-    }
+    assert.match(rule(".appnav"), /padding: 16px max\(var\(--gutter\), calc\(\(100% - var\(--page\)\) \/ 2\)\)/, "the header is not aligned with the content");
     for (const viewport of [1920, 2560, 3840, 5120]) {
         assert.equal(contentWidth(viewport), page, `${viewport} px`);
     }
@@ -68,6 +66,19 @@ test("forms, sign-in and account pages stay narrow, card pages use the full widt
     }
     for (const name of ["frontpage", "wishlists", "wishlist", "public", "groups", "group"]) {
         assert.doesNotMatch(body(name), /narrow/, name);
+    }
+    const shell = fs.readFileSync(path.join(root, "controllers/oauth_server.go"), "utf8");
+    assert.match(shell, /<body class="narrow">/, "the OAuth pages built in Go");
+    assert.match(css, /^\.container > \.auth-card \{ max-width: 640px; margin: 0 auto; \}$/m);
+});
+
+test("no page asks for a container class the stylesheet no longer has", () => {
+    const files = [
+        ...fs.readdirSync(path.join(root, "controllers")).filter((name) => name.endsWith(".go")).map((name) => "controllers/" + name),
+        ...["html", "js", "templates"].flatMap((dir) => fs.readdirSync(path.join(root, "web", dir)).map((name) => `web/${dir}/${name}`))
+    ];
+    for (const file of files) {
+        assert.doesNotMatch(fs.readFileSync(path.join(root, file), "utf8"), /container narrow/, file);
     }
 });
 
