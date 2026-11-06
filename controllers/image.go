@@ -374,8 +374,8 @@ func fitWithin(img image.Image, maxWidth int, maxHeight int) image.Image {
 
 // uploadDecoders reads the accepted upload formats. The format is recognised
 // from the first bytes, never from the type a data URI or a client names. Only
-// the first frame of an animated GIF is kept; an animated WebP is refused by
-// the decoder.
+// the first frame of an animated GIF is kept; an animated WebP is refused
+// from its header.
 var uploadDecoders = map[string]struct {
 	config func(io.Reader) (image.Config, error)
 	decode func(io.Reader) (image.Image, error)
@@ -402,6 +402,14 @@ func uploadFormat(b []byte) string {
 	return ""
 }
 
+// animatedWebP reads the animation flag of an extended WebP, whose VP8X chunk
+// must come first. The decoder would refuse the file anyway, but only as a
+// broken image.
+func animatedWebP(b []byte) bool {
+	const animationFlag = 1 << 1
+	return len(b) > 20 && string(b[12:16]) == "VP8X" && b[20]&animationFlag != 0
+}
+
 // decodeUploadedImage decodes an uploaded JPEG, PNG, GIF or WebP and bakes
 // any EXIF orientation into the pixels. The re-encode in encodeWebP writes no
 // metadata, which is what keeps EXIF (GPS, camera serial, timestamps) out of
@@ -412,6 +420,9 @@ func decodeUploadedImage(imageBytes []byte) (image.Image, error) {
 	decoder, ok := uploadDecoders[format]
 	if !ok {
 		return nil, errors.New("Invalid image type: use JPEG, PNG, GIF or WebP.")
+	}
+	if format == "webp" && animatedWebP(imageBytes) {
+		return nil, errors.New("Animated WebP images are not supported.")
 	}
 
 	config, err := decoder.config(bytes.NewReader(imageBytes))

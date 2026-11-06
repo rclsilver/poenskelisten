@@ -212,6 +212,7 @@ export function loadScripts(files, options = {}) {
         sessionStorage: memoryStorage(),
         URL,
         Intl,
+        atob,
         setTimeout: () => 0,
         // API calls never answer: rendering must not wait on them.
         fetch: () => new Promise(() => {}),

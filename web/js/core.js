@@ -507,10 +507,12 @@
         };
     };
 
-    // Returns a smaller data URL, or null when the image already fits.
-    function shrinkImage(image, type) {
+    // Returns a smaller data URL, or null when the image already fits. A
+    // redrawn image is always returned when asked to, which keeps only the
+    // first frame of an animation.
+    function shrinkImage(image, type, redraw) {
         var size = P.fitImageSize(image.naturalWidth, image.naturalHeight, P.MAX_IMAGE_PIXELS);
-        if (size.width === image.naturalWidth && size.height === image.naturalHeight) {
+        if (!redraw && size.width === image.naturalWidth && size.height === image.naturalHeight) {
             return null;
         }
         var canvas = doc.createElement("canvas");
@@ -523,6 +525,17 @@
         var output = type === "image/jpeg" || type === "image/webp" ? type : "image/png";
         return canvas.toDataURL(output, 0.9);
     }
+
+    // The server refuses animated WebP, which an extended WebP announces in
+    // its first chunk (VP8X), right after the 12-byte RIFF header.
+    P.isAnimatedWebP = function (dataUrl) {
+        var match = /^data:image\/webp;base64,([A-Za-z0-9+\/]{32})/.exec(dataUrl || "");
+        if (!match) {
+            return false;
+        }
+        var head = root.atob(match[1]);
+        return head.slice(12, 16) === "VP8X" && (head.charCodeAt(20) & 2) !== 0;
+    };
 
     P.isImageDataUrl = function (value) {
         return typeof value === "string" && /^data:image\/(jpeg|png|gif|webp|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
@@ -559,7 +572,7 @@
                 probe.onload = function () {
                     var smaller = null;
                     try {
-                        smaller = shrinkImage(probe, file.type);
+                        smaller = shrinkImage(probe, file.type, P.isAnimatedWebP(url));
                     } catch (error) {
                         // The server will say if the original is too large.
                     }
