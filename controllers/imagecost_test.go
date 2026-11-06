@@ -301,7 +301,7 @@ func TestDecodeCostCoversAllocations(t *testing.T) {
 
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		if _, err := decodeUploadedImage(context.Background(), c.raw, c.mime); err != nil {
+		if _, err := decodeUploadedImage(context.Background(), c.raw); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		runtime.ReadMemStats(&after)

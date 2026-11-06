@@ -62,7 +62,7 @@ func BenchmarkDecodeImageUpload(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := decodeUploadedImage(context.Background(), c.data, c.mime); err != nil {
+				if _, err := decodeUploadedImage(context.Background(), c.data); err != nil {
 					b.Fatal(err)
 				}
 			}
