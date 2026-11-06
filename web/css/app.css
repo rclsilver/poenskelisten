@@ -403,6 +403,8 @@ dialog::backdrop { background: var(--overlay); }
     #prefs-menu { margin-left: auto; }
     .menu { position: static; }
     .menu-panel { top: auto; right: 16px; margin-top: 8px; max-width: calc(100vw - 32px); }
+    #prefs-menu > summary { anchor-name: --prefs; }
+    #prefs-menu > .menu-panel { right: min(anchor(--prefs right), calc(100% - 256px)); }
     .brand { font-size: 1.05rem; margin-right: auto; }
     .navlinks a { padding: 8px 10px; font-size: 0.8125rem; }
     .hero { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
