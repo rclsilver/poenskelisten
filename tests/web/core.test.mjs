@@ -144,6 +144,18 @@ test("image checks accept JPEG, PNG, GIF and WebP up to 10 MB", () => {
     assert.ok(!P.isImageDataUrl("javascript:alert(1)"));
 });
 
+test("animated WebP pictures are recognised from their header", () => {
+    const { P } = loadCore();
+    const riff = (chunk) => "data:image/webp;base64," + Buffer.concat([Buffer.from("RIFF\0\0\0\0WEBP"), chunk, Buffer.alloc(16)]).toString("base64");
+    const vp8x = (flags) => Buffer.concat([Buffer.from("VP8X"), Buffer.from([10, 0, 0, 0, flags, 0, 0, 0, 19, 0, 0, 19, 0, 0])]);
+    assert.ok(P.isAnimatedWebP(riff(vp8x(0x02))));
+    assert.ok(P.isAnimatedWebP(riff(vp8x(0x12))), "animated with alpha");
+    assert.ok(!P.isAnimatedWebP(riff(vp8x(0x10))), "still with alpha");
+    assert.ok(!P.isAnimatedWebP(riff(Buffer.from("VP8L\x05\0\0\0\x2f\0\0\0\0"))), "simple lossless");
+    assert.ok(!P.isAnimatedWebP("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+    assert.ok(!P.isAnimatedWebP("data:image/webp;base64,UklG"), "too short");
+});
+
 test("stored WebP pictures are shown", () => {
     const { P } = loadCore();
     const webp = "data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";

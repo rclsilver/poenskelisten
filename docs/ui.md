@@ -40,7 +40,7 @@ Eligible means active (not expired) and owned or collaborated on.
 
 Wishes can be grouped by category (categories keep the order they were created in, and can be collapsed) or shown flat, and sorted by date or price. The choice is kept in `localStorage` (`poenskelistenWishSort`), along with the language and theme. Nothing else is stored there.
 
-Images are JPEG, PNG, GIF or WebP up to 10 MB, checked in the browser for a quick answer and again by the server, which re-encodes them as WebP (dropping EXIF, keeping transparency) and keeps a 250 px thumbnail. Cards show the thumbnail (`GET /api/both/wishes/:id/image?thumbnail=true`), the enlarged view the full image. Product links open only if they are `http(s)`, in a new tab with `rel="noopener noreferrer"`.
+Images are JPEG, PNG, GIF or WebP up to 10 MB, checked in the browser for a quick answer and again by the server (the browser redraws an animated WebP to its first frame, which the server would refuse), which re-encodes them as WebP (dropping EXIF, keeping transparency) and keeps a 250 px thumbnail. Cards show the thumbnail (`GET /api/both/wishes/:id/image?thumbnail=true`), the enlarged view the full image. Product links open only if they are `http(s)`, in a new tab with `rel="noopener noreferrer"`.
 
 ### Groups
 

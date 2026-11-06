@@ -1649,15 +1649,27 @@ func TestDecodeImageUploadRefusesAWebPLargerThanItsCanvas(t *testing.T) {
 	}
 }
 
+// An animated WebP is refused from its header with a message that says why,
+// and, being expected, isn't logged as an error.
 func TestDecodeImageUploadRefusesAnAnimatedWebP(t *testing.T) {
-	const animation = 1 << 1
-	frame := imageTestEncode(t, "webp-lossless", imageTestHalfTransparent())[12:] // its VP8L chunk
-	anmf := append(make([]byte, 16), frame...)
-	raw := imageTestRIFF(imageTestVP8X(animation, 20, 20), imageTestChunk("ANIM", make([]byte, 6)), imageTestChunk("ANMF", anmf))
+	hook := logrusTest.NewLocal(logger.Log)
+	t.Cleanup(func() { logger.Log.ReplaceHooks(make(logrus.LevelHooks)) })
 
-	_, err := decodeImageUpload(context.Background(), uuid.New(), imageTestDataURI("image/webp", raw))
-	if err == nil || err.Error() != "Failed to create image from byte array." {
-		t.Errorf("err = %v, want the decoder to refuse the animation", err)
+	frame := func(c color.Color) image.Image { return image.NewPaletted(image.Rect(0, 0, 20, 20), color.Palette{c}) }
+	buf := new(bytes.Buffer)
+	animation := &webp.WEBP{Image: []image.Image{frame(color.NRGBA{R: 255, A: 255}), frame(color.NRGBA{B: 255, A: 255})}, Delay: []int{100, 100}}
+	if err := webp.EncodeAll(buf, animation, webp.Options{Quality: 90}); err != nil {
+		t.Fatalf("failed to encode fixture: %v", err)
+	}
+
+	_, err := decodeImageUpload(context.Background(), uuid.New(), imageTestDataURI("image/webp", buf.Bytes()))
+	if err == nil || err.Error() != "Animated WebP images are not supported." {
+		t.Errorf("err = %v, want the animation refused", err)
+	}
+	for _, entry := range hook.AllEntries() {
+		if entry.Level <= logrus.ErrorLevel {
+			t.Errorf("logged %q at %s, want nothing at error level", entry.Message, entry.Level)
+		}
 	}
 }
 
