@@ -11,8 +11,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"image"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -23,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"golang.org/x/image/draw"
+	xwebp "golang.org/x/image/webp"
 )
 
 var profileImageDir, _ = filepath.Abs("./images/profiles")
@@ -369,28 +372,49 @@ func fitWithin(img image.Image, maxWidth int, maxHeight int) image.Image {
 	return resized
 }
 
-// decodeUploadedImage decodes an uploaded JPEG/PNG and bakes any EXIF
-// orientation into the pixels. The re-encode in encodeWebP writes no
+// uploadDecoders reads the accepted upload formats. The format is recognised
+// from the first bytes, never from the type a data URI or a client names. Only
+// the first frame of an animated GIF is kept; an animated WebP is refused by
+// the decoder.
+var uploadDecoders = map[string]struct {
+	config func(io.Reader) (image.Config, error)
+	decode func(io.Reader) (image.Image, error)
+}{
+	"jpeg": {jpeg.DecodeConfig, jpeg.Decode},
+	"png":  {png.DecodeConfig, png.Decode},
+	"gif":  {gif.DecodeConfig, gif.Decode},
+	"webp": {xwebp.DecodeConfig, xwebp.Decode},
+}
+
+// uploadFormat names the format of an uploaded image from its signature, or
+// returns "" for anything else.
+func uploadFormat(b []byte) string {
+	switch {
+	case bytes.HasPrefix(b, []byte("\xff\xd8\xff")):
+		return "jpeg"
+	case bytes.HasPrefix(b, []byte("\x89PNG\r\n\x1a\n")):
+		return "png"
+	case bytes.HasPrefix(b, []byte("GIF87a")), bytes.HasPrefix(b, []byte("GIF89a")):
+		return "gif"
+	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return "webp"
+	}
+	return ""
+}
+
+// decodeUploadedImage decodes an uploaded JPEG, PNG, GIF or WebP and bakes
+// any EXIF orientation into the pixels. The re-encode in encodeWebP writes no
 // metadata, which is what keeps EXIF (GPS, camera serial, timestamps) out of
 // stored and served images - but it also drops the orientation tag, so it has
 // to be applied here or phone photos end up sideways.
-func decodeUploadedImage(imageBytes []byte, mimeType string) (image.Image, error) {
-	var decodeConfig func([]byte) (image.Config, error)
-	var decode func([]byte) (image.Image, error)
-
-	switch mimeType {
-	case "image/jpeg":
-		decodeConfig = func(b []byte) (image.Config, error) { return jpeg.DecodeConfig(bytes.NewReader(b)) }
-		decode = func(b []byte) (image.Image, error) { return jpeg.Decode(bytes.NewReader(b)) }
-	case "image/png":
-		decodeConfig = func(b []byte) (image.Config, error) { return png.DecodeConfig(bytes.NewReader(b)) }
-		decode = func(b []byte) (image.Image, error) { return png.Decode(bytes.NewReader(b)) }
-	default:
-		logger.Log.Error("Invalid mime type for image. Type: " + mimeType)
-		return nil, errors.New("Invalid image type.")
+func decodeUploadedImage(imageBytes []byte) (image.Image, error) {
+	format := uploadFormat(imageBytes)
+	decoder, ok := uploadDecoders[format]
+	if !ok {
+		return nil, errors.New("Invalid image type: use JPEG, PNG, GIF or WebP.")
 	}
 
-	config, err := decodeConfig(imageBytes)
+	config, err := decoder.config(bytes.NewReader(imageBytes))
 	if err != nil {
 		logger.Log.Error("Failed to read image header. Returning. Error: " + err.Error())
 		return nil, errors.New("Failed to create image from byte array.")
@@ -402,13 +426,13 @@ func decodeUploadedImage(imageBytes []byte, mimeType string) (image.Image, error
 	imageWorkers <- struct{}{}
 	defer func() { <-imageWorkers }()
 
-	imageObject, err := decode(imageBytes)
+	imageObject, err := decoder.decode(bytes.NewReader(imageBytes))
 	if err != nil {
 		logger.Log.Error("Failed to create image from byte array. Returning. Error: " + err.Error())
 		return nil, errors.New("Failed to create image from byte array.")
 	}
 
-	if mimeType == "image/jpeg" {
+	if format == "jpeg" {
 		imageObject = utilities.ApplyOrientation(imageObject, utilities.JPEGOrientation(imageBytes))
 	}
 
@@ -418,7 +442,7 @@ func decodeUploadedImage(imageBytes []byte, mimeType string) (image.Image, error
 // decodeImageUpload checks and decodes a base64 data-URI upload. Its errors
 // are worded for the user.
 func decodeImageUpload(base64String string) (image.Image, error) {
-	imageBytes, mimeType, err := Base64ToImageBytes(base64String)
+	imageBytes, _, err := Base64ToImageBytes(base64String)
 	if err != nil {
 		logger.Log.Error("Failed to convert Base64 String to bytes. Error: " + err.Error())
 		return nil, errors.New("Invalid Base64 string.")
@@ -428,7 +452,7 @@ func decodeImageUpload(base64String string) (image.Image, error) {
 		return nil, errors.New("Image is too large.")
 	}
 
-	return decodeUploadedImage(imageBytes, mimeType)
+	return decodeUploadedImage(imageBytes)
 }
 
 // storeUploadedImage validates a base64 data-URI upload and stores it as a

@@ -11,6 +11,8 @@ import (
 	"errors"
 	"hash/crc32"
 	"image"
+	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io/fs"
@@ -23,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gen2brain/webp"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -389,15 +392,18 @@ func TestUpdateUserProfileImageGarbageRejected(t *testing.T) {
 	}
 }
 
-func TestUpdateUserProfileImageInvalidMimeType(t *testing.T) {
+func TestUpdateUserProfileImageUnsupportedFormat(t *testing.T) {
 	setupControllersDB(t)
 	imageTestSetup(t)
 	user := createTestUser(t)
 
-	raw := imageTestRandomImageBytes(t, 200, 200, false)
-	uri := imageTestDataURI("image/gif", raw)
-	if err := storeUploadedImage(profileImageDir, user.ID, uri); err == nil {
-		t.Error("expected an error for an unsupported mime type")
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>`)
+	bmp := append([]byte("BM"), make([]byte, 64)...)
+	for _, raw := range [][]byte{svg, bmp} {
+		err := storeUploadedImage(profileImageDir, user.ID, imageTestDataURI("image/png", raw))
+		if err == nil || !strings.Contains(err.Error(), "Invalid image type") {
+			t.Errorf("err = %v, want the unsupported format refused", err)
+		}
 	}
 }
 
@@ -1190,17 +1196,10 @@ func TestCheckIfWishImageExistsStatError(t *testing.T) {
 }
 
 func TestDecodeUploadedImageTruncated(t *testing.T) {
-	cases := []struct {
-		mime  string
-		asPNG bool
-	}{
-		{"image/jpeg", false},
-		{"image/png", true},
-	}
-	for _, c := range cases {
-		t.Run(c.mime, func(t *testing.T) {
-			raw := imageTestRandomImageBytes(t, 200, 200, c.asPNG)
-			img, err := decodeUploadedImage(raw[:len(raw)/2], c.mime)
+	for _, format := range imageTestFormats {
+		t.Run(format, func(t *testing.T) {
+			raw := imageTestEncode(t, format, imageTestHalfTransparent())
+			img, err := decodeUploadedImage(raw[:len(raw)/2])
 			if err == nil || img != nil || err.Error() != "Failed to create image from byte array." {
 				t.Errorf("decodeUploadedImage = (%v, %v), want the decode error", img, err)
 			}
@@ -1263,5 +1262,203 @@ func TestDeleteUserProfileImageRemoveFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(imageFilePath(profileImageDir, userID, false)); err != nil {
 		t.Errorf("profile image should still exist: %v", err)
+	}
+}
+
+var imageTestFormats = []string{"jpeg", "png", "gif", "webp", "webp-lossless"}
+
+// imageTestHalfTransparent is 20x20: transparent on the left half, opaque red
+// on the right.
+func imageTestHalfTransparent() *image.Paletted {
+	img := image.NewPaletted(image.Rect(0, 0, 20, 20), color.Palette{color.Transparent, color.NRGBA{R: 255, A: 255}})
+	for y := 0; y < 20; y++ {
+		for x := 10; x < 20; x++ {
+			img.SetColorIndex(x, y, 1)
+		}
+	}
+	return img
+}
+
+func imageTestEncode(t *testing.T, format string, img image.Image) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	var err error
+	switch format {
+	case "jpeg":
+		err = jpeg.Encode(buf, img, nil)
+	case "png":
+		err = png.Encode(buf, img)
+	case "gif":
+		err = gif.Encode(buf, img, nil)
+	case "webp":
+		err = webp.Encode(buf, img, webp.Options{Quality: 90})
+	case "webp-lossless":
+		err = webp.Encode(buf, img, webp.Options{Lossless: true})
+	default:
+		t.Fatalf("unknown format %q", format)
+	}
+	if err != nil {
+		t.Fatalf("failed to encode %s fixture: %v", format, err)
+	}
+	return buf.Bytes()
+}
+
+// imageTestStoredFull reads back the stored full-size image of a wish.
+func imageTestStoredFull(t *testing.T, wishID uuid.UUID) image.Image {
+	t.Helper()
+	stored, err := os.ReadFile(imageFilePath(wishImageDir, wishID, false))
+	if err != nil {
+		t.Fatalf("failed to read stored image: %v", err)
+	}
+	if !bytes.HasPrefix(stored, []byte("RIFF")) || string(stored[8:12]) != "WEBP" {
+		t.Fatalf("stored image is not a WebP: % x", stored[:12])
+	}
+	img, _, err := image.Decode(bytes.NewReader(stored))
+	if err != nil {
+		t.Fatalf("failed to decode stored image: %v", err)
+	}
+	return img
+}
+
+func TestSaveWishImageAcceptsEveryUploadFormat(t *testing.T) {
+	imageTestSetup(t)
+	for _, format := range imageTestFormats {
+		t.Run(format, func(t *testing.T) {
+			wishID := uuid.New()
+			mime := "image/" + strings.TrimSuffix(format, "-lossless")
+			uri := imageTestDataURI(mime, imageTestEncode(t, format, imageTestHalfTransparent()))
+			if err := storeUploadedImage(wishImageDir, wishID, uri); err != nil {
+				t.Fatalf("storeUploadedImage failed: %v", err)
+			}
+
+			img := imageTestStoredFull(t, wishID)
+			if got := img.Bounds().Size(); got != image.Pt(20, 20) {
+				t.Errorf("stored size = %v, want 20x20", got)
+			}
+			if _, _, _, a := img.At(16, 10).RGBA(); a != 0xffff {
+				t.Errorf("opaque pixel stored with alpha %d, want 255", a>>8)
+			}
+			if format == "jpeg" {
+				return // JPEG has no transparency
+			}
+			if _, _, _, a := img.At(3, 10).RGBA(); a != 0 {
+				t.Errorf("transparent pixel stored with alpha %d, want 0", a>>8)
+			}
+		})
+	}
+}
+
+// The format comes from the bytes: the type a data URI names is neither
+// trusted nor needed.
+func TestDecodeImageUploadReadsTheFormatFromTheContent(t *testing.T) {
+	for _, format := range imageTestFormats {
+		raw := imageTestEncode(t, format, imageTestHalfTransparent())
+		for _, mime := range []string{"image/jpeg", "image/svg+xml", "text/plain"} {
+			if _, err := decodeImageUpload(imageTestDataURI(mime, raw)); err != nil {
+				t.Errorf("%s sent as %s: %v", format, mime, err)
+			}
+		}
+	}
+}
+
+func TestDecodeImageUploadKeepsTheFirstFrameOfAnAnimatedGIF(t *testing.T) {
+	frame := func(c color.Color) *image.Paletted {
+		img := image.NewPaletted(image.Rect(0, 0, 8, 8), color.Palette{c})
+		return img
+	}
+	red, blue := color.NRGBA{R: 255, A: 255}, color.NRGBA{B: 255, A: 255}
+	buf := new(bytes.Buffer)
+	if err := gif.EncodeAll(buf, &gif.GIF{Image: []*image.Paletted{frame(red), frame(blue)}, Delay: []int{10, 10}}); err != nil {
+		t.Fatal(err)
+	}
+
+	img, err := decodeImageUpload(imageTestDataURI("image/gif", buf.Bytes()))
+	if err != nil {
+		t.Fatalf("decodeImageUpload failed: %v", err)
+	}
+	if r, _, b, _ := img.At(4, 4).RGBA(); r != 0xffff || b != 0 {
+		t.Errorf("pixel = %v, want the red first frame", img.At(4, 4))
+	}
+}
+
+// imageTestRIFF wraps chunks into a WebP file.
+func imageTestRIFF(chunks ...[]byte) []byte {
+	body := []byte("WEBP")
+	for _, c := range chunks {
+		body = append(body, c...)
+	}
+	return append(binary.LittleEndian.AppendUint32([]byte("RIFF"), uint32(len(body))), body...)
+}
+
+func imageTestChunk(id string, data []byte) []byte {
+	chunk := binary.LittleEndian.AppendUint32([]byte(id), uint32(len(data)))
+	chunk = append(chunk, data...)
+	if len(data)%2 == 1 {
+		chunk = append(chunk, 0)
+	}
+	return chunk
+}
+
+// imageTestVP8X is the extended WebP header, declaring a canvas.
+func imageTestVP8X(flags byte, width, height int) []byte {
+	data := []byte{flags, 0, 0, 0}
+	data = append(data, byte(width-1), byte((width-1)>>8), byte((width-1)>>16))
+	data = append(data, byte(height-1), byte((height-1)>>8), byte((height-1)>>16))
+	return imageTestChunk("VP8X", data)
+}
+
+// Like PNG, a GIF or WebP of a few bytes can declare millions of pixels. They
+// are refused from the header, before any decoding.
+func TestDecodeImageUploadRefusesLargeGIFAndWebPBeforeDecoding(t *testing.T) {
+	small := imageTestEncode(t, "gif", imageTestHalfTransparent())
+	largeGIF := append([]byte{}, small...)
+	binary.LittleEndian.PutUint16(largeGIF[6:8], 7000) // logical screen width
+	binary.LittleEndian.PutUint16(largeGIF[8:10], 7000)
+
+	cases := map[string][]byte{
+		"gif":  largeGIF,
+		"webp": imageTestRIFF(imageTestVP8X(0, 7000, 7000), imageTestChunk("VP8L", make([]byte, 16))),
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			var err error
+			allocated := imageTestAllocated(func() { _, err = decodeImageUpload(imageTestDataURI("image/"+name, raw)) })
+			if err == nil || !strings.Contains(err.Error(), "megapixels") {
+				t.Errorf("err = %v, want the pixel limit", err)
+			}
+			if allocated > 4<<20 {
+				t.Errorf("refusing the image allocated %d bytes, want it refused before decoding", allocated)
+			}
+		})
+	}
+}
+
+// A WebP can declare a small canvas and carry a much larger image. The header
+// check alone would let it through, so the decoder must refuse the mismatch
+// before allocating the image.
+func TestDecodeImageUploadRefusesAWebPLargerThanItsCanvas(t *testing.T) {
+	// VP8L header of a 16384x16384 image.
+	vp8l := append([]byte{0x2f, 0xff, 0xff, 0xff, 0x0f}, make([]byte, 64)...)
+	raw := imageTestRIFF(imageTestVP8X(0, 10, 10), imageTestChunk("VP8L", vp8l))
+
+	var err error
+	allocated := imageTestAllocated(func() { _, err = decodeImageUpload(imageTestDataURI("image/webp", raw)) })
+	if err == nil || err.Error() != "Failed to create image from byte array." {
+		t.Errorf("err = %v, want the decode error", err)
+	}
+	if allocated > 4<<20 {
+		t.Errorf("refusing the image allocated %d bytes, want it refused before decoding", allocated)
+	}
+}
+
+func TestDecodeImageUploadRefusesAnAnimatedWebP(t *testing.T) {
+	const animation = 1 << 1
+	frame := imageTestEncode(t, "webp-lossless", imageTestHalfTransparent())[12:] // its VP8L chunk
+	anmf := append(make([]byte, 16), frame...)
+	raw := imageTestRIFF(imageTestVP8X(animation, 20, 20), imageTestChunk("ANIM", make([]byte, 6)), imageTestChunk("ANMF", anmf))
+
+	_, err := decodeImageUpload(imageTestDataURI("image/webp", raw))
+	if err == nil || err.Error() != "Failed to create image from byte array." {
+		t.Errorf("err = %v, want the decoder to refuse the animation", err)
 	}
 }

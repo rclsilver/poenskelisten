@@ -497,7 +497,7 @@
     // The server refuses images of more than 4 megapixels, which phone
     // photos often are, so larger ones are scaled down before sending.
     P.MAX_IMAGE_PIXELS = 4000000;
-    P.IMAGE_TYPES = ["image/jpeg", "image/png"];
+    P.IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
     P.fitImageSize = function (width, height, maxPixels) {
         var scale = Math.min(1, Math.sqrt(maxPixels / (width * height)));
@@ -518,12 +518,14 @@
         canvas.height = size.height;
         var context = canvas.getContext("2d");
         context.drawImage(image, 0, 0, size.width, size.height);
-        // A PNG may be transparent, which JPEG would turn black.
-        return canvas.toDataURL(type === "image/png" ? "image/png" : "image/jpeg", 0.9);
+        // Only a JPEG is sure to be opaque: JPEG would turn transparency black.
+        // A browser that can't write WebP returns a PNG, which the server takes.
+        var output = type === "image/jpeg" || type === "image/webp" ? type : "image/png";
+        return canvas.toDataURL(output, 0.9);
     }
 
     P.isImageDataUrl = function (value) {
-        return typeof value === "string" && /^data:image\/(jpeg|png|webp|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
+        return typeof value === "string" && /^data:image\/(jpeg|png|gif|webp|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/.test(value);
     };
 
     // A quick answer only: the server checks the image again and re-encodes it.
@@ -549,7 +551,7 @@
             var reader = new root.FileReader();
             reader.onload = function () {
                 var url = String(reader.result || "");
-                if (!/^data:image\/(jpeg|png);base64,/.test(url)) {
+                if (!/^data:image\/(jpeg|png|gif|webp);base64,/.test(url)) {
                     reject(new Error(P.t("image.badType")));
                     return;
                 }

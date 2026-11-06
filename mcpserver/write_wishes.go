@@ -46,7 +46,7 @@ type createWishArgs struct {
 	URL          string   `json:"url,omitempty" jsonschema:"optional http(s) link to the item"`
 	Price        *float64 `json:"price,omitempty" jsonschema:"optional price, zero or more"`
 	CategoryName string   `json:"category_name,omitempty" jsonschema:"optional category: an existing one of the wishlist is reused by name, otherwise it is created"`
-	Image        string   `json:"image,omitempty" jsonschema:"optional picture as a base64 data URI (data:image/jpeg;base64,... or data:image/png;base64,...), at most 10 MB decoded"`
+	Image        string   `json:"image,omitempty" jsonschema:"optional picture as a base64 data URI (JPEG, PNG, GIF or WebP, e.g. data:image/webp;base64,...), at most 10 MB decoded"`
 }
 
 type updateWishArgs struct {
@@ -56,7 +56,7 @@ type updateWishArgs struct {
 	URL          *string  `json:"url,omitempty" jsonschema:"new http(s) link; an empty string clears it"`
 	Price        *float64 `json:"price,omitempty" jsonschema:"new price, zero or more"`
 	CategoryName *string  `json:"category_name,omitempty" jsonschema:"move the wish to this category (created if needed); an empty string removes it from its category"`
-	Image        *string  `json:"image,omitempty" jsonschema:"set or replace the picture: a base64 data URI (data:image/jpeg;base64,... or data:image/png;base64,...), at most 10 MB decoded"`
+	Image        *string  `json:"image,omitempty" jsonschema:"set or replace the picture: a base64 data URI (JPEG, PNG, GIF or WebP, e.g. data:image/webp;base64,...), at most 10 MB decoded"`
 	ImageDelete  bool     `json:"image_delete,omitempty" jsonschema:"remove the wish's picture; cannot be combined with image"`
 }
 

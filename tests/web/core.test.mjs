@@ -129,12 +129,15 @@ test("safeLocalPath only follows paths on this site", () => {
     }
 });
 
-test("image checks accept JPEG and PNG up to 10 MB", () => {
+test("image checks accept JPEG, PNG, GIF and WebP up to 10 MB", () => {
     const { P } = loadCore();
     assert.equal(P.checkImageFile({ type: "image/png", size: 10000000 }), null);
     assert.equal(P.checkImageFile({ type: "image/jpeg", size: 1 }), null);
-    assert.equal(P.checkImageFile({ type: "image/gif", size: 1 }), "image.badType");
+    assert.equal(P.checkImageFile({ type: "image/gif", size: 1 }), null);
+    assert.equal(P.checkImageFile({ type: "image/webp", size: 1 }), null);
     assert.equal(P.checkImageFile({ type: "image/svg+xml", size: 1 }), "image.badType");
+    assert.equal(P.checkImageFile({ type: "image/heic", size: 1 }), "image.badType");
+    assert.ok(P.isImageDataUrl("data:image/gif;base64,R0lGODlh"), "a chosen GIF is previewed");
     assert.equal(P.checkImageFile({ type: "image/png", size: 10000001 }), "image.tooBig");
     assert.ok(P.isImageDataUrl("data:image/jpeg;base64,/9j/4AAQ"));
     assert.ok(!P.isImageDataUrl("data:image/jpeg;base64,/9j/\"><script>"));
@@ -147,7 +150,7 @@ test("stored WebP pictures are shown", () => {
     assert.ok(P.isImageDataUrl(webp));
     assert.equal(P.safeImageSrc(webp), webp);
     assert.ok(!P.isImageDataUrl("data:image/webpx;base64,UklGRg=="));
-    assert.ok(!P.isImageDataUrl("data:image/gif;base64,R0lGODlh"));
+    assert.ok(!P.isImageDataUrl("data:image/bmp;base64,Qk0="));
     assert.equal(P.safeImageSrc("data:image/webp;base64,UklGR\"><script>"), "");
 });
 

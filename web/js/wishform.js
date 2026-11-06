@@ -96,7 +96,7 @@
         var hadImage = editing && !!wish.image;
         var currentImage = null;
         var image = { action: hadImage ? "keep" : "none", data: "" };
-        var file = h("input", { type: "file", name: "image", accept: "image/png,image/jpeg" });
+        var file = h("input", { type: "file", name: "image", accept: "image/png,image/jpeg,image/gif,image/webp" });
         var imageError = h("p", { class: "field-error", role: "alert", hidden: true });
         var removeImage = P.button(P.t("wishForm.removeImage"), function () {
             image = { action: hadImage ? "delete" : "none", data: "" };

@@ -16,7 +16,7 @@
         });
 
         var email = h("input", { type: "email", name: "email", required: !oidc, readOnly: oidc, value: account.email || "", attrs: { autocomplete: "email" } });
-        var file = h("input", { type: "file", name: "picture", accept: "image/png,image/jpeg" });
+        var file = h("input", { type: "file", name: "picture", accept: "image/png,image/jpeg,image/gif,image/webp" });
         var imageData = "";
         var imageError = h("p", { class: "field-error", role: "alert", hidden: true });
         file.addEventListener("change", function () {
