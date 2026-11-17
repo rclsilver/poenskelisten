@@ -59,6 +59,11 @@
         return h("span", { class: "badge reserved" }, P.icon("lock"), P.t("wish.claimed"));
     }
 
+    // The owner/collaborator mark and the surprise claim share one word.
+    function reservedBadge() {
+        return h("span", { class: "badge reserved" }, P.icon("lock"), P.t("wish.claimed"));
+    }
+
     function imageBox(wish, ctx) {
         var box;
         if (ctx.mode === "preview") {
@@ -93,10 +98,16 @@
     P.wishCard = function (wish, ctx) {
         var claim = P.claimState(wish, ctx.userID);
         var claimable = !!wish.wish_claimable;
+        var reserved = !!(wish.reservation && wish.reservation.reserved);
         var showClaims = ctx.showClaims && claimable && ctx.mode !== "manage" && ctx.mode !== "preview";
         var image = imageBox(wish, ctx);
-        if (showClaims) {
-            image.appendChild(statusBadge(claim.state));
+        // One badge only: an owner/collaborator mark wins over the claim badge.
+        if (ctx.mode !== "preview") {
+            if (reserved) {
+                image.appendChild(reservedBadge());
+            } else if (showClaims) {
+                image.appendChild(statusBadge(claim.state));
+            }
         }
 
         var currency = { currency: wish.currency, padding: wish.currency_padding, left: wish.currency_left };
@@ -122,9 +133,17 @@
             }
         }
         if (ctx.mode === "manage") {
+            if (reserved) {
+                foot.appendChild(P.button(P.t("wish.unreserve"), function () { ctx.onUnreserve(wish); }, "small", "lock"));
+            } else {
+                foot.appendChild(P.button(P.t("wish.reserve"), function () { ctx.onReserve(wish); }, "small", "lock"));
+            }
             foot.appendChild(h("a", { class: "btn small", href: "/wishes/" + encodeURIComponent(wish.id) + "/edit" }, P.icon("edit"), P.t("action.edit")));
             foot.appendChild(P.button(P.t("wish.delete", { name: wish.name }), function () { ctx.onDelete(wish); }, "small icon danger-quiet", "trash"));
         }
+
+        // Owner side only: the internal note travels blank to everyone else.
+        var note = ctx.mode === "manage" && reserved && wish.reservation.note ? wish.reservation.note : "";
 
         var updated = ctx.mode !== "preview" && wish.updated_at ? P.fmtDate(wish.updated_at) : "";
         return h("article", { class: "wish-card" + (showClaims && claim.state === "other" ? " claimed-other" : ""), id: wish.id ? "wish-" + wish.id : null },
@@ -135,6 +154,7 @@
                     price ? h("span", { class: "price", text: price }) : null),
                 h("h3", { text: wish.name }),
                 wish.note ? h("p", { class: "note", text: wish.note }) : null,
+                note ? h("p", { class: "reservation-note" }, h("strong", { text: P.t("wish.reservationNote") + " : " }), h("span", { text: note })) : null,
                 updated ? h("p", { class: "wish-meta", text: P.t("wish.updated", { date: updated }) }) : null,
                 foot.childNodes.length ? foot : null));
     };

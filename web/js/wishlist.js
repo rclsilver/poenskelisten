@@ -108,6 +108,31 @@
                         reload();
                     }, P.error);
                 };
+                var reserve = function (wish) {
+                    var note = h("input", { type: "text", name: "note", "aria-label": P.t("wish.reservationNote"), attrs: { maxlength: "280", autocomplete: "off" }, value: (wish.reservation && wish.reservation.note) || "" });
+                    P.dialog({
+                        title: P.t("wish.reserve"),
+                        content: h("div", { class: "stack tight" }, h("label", null, P.t("wish.reservationNote"), note)),
+                        actions: [
+                            { label: P.t("action.cancel"), kind: "quiet" },
+                            { label: P.t("wish.reserve"), kind: "primary", onClick: function () {
+                                return P.api("POST", "auth/wishes/" + encodeURIComponent(wish.id) + "/reservation", { note: note.value }).then(function () {
+                                    P.toast(P.t("wish.reserveToast"));
+                                    reload();
+                                }, function (err) {
+                                    P.error(err);
+                                    return false;
+                                });
+                            } }
+                        ]
+                    });
+                };
+                var unreserve = function (wish) {
+                    P.api("DELETE", "auth/wishes/" + encodeURIComponent(wish.id) + "/reservation").then(function () {
+                        P.toast(P.t("wish.unreserveToast"));
+                        reload();
+                    }, P.error);
+                };
                 var remove = function (wish) {
                     P.confirm({ title: P.t("wish.deleteTitle"), message: P.t("wish.deleteConfirm", { name: wish.name }), confirm: P.t("action.delete"), danger: true }).then(function (yes) {
                         if (yes) {
@@ -127,6 +152,8 @@
                     hideClaimers: !!wishlist.hide_claimers,
                     onClaim: claim,
                     onUnclaim: unclaim,
+                    onReserve: reserve,
+                    onUnreserve: unreserve,
                     onDelete: remove,
                     empty: manage && !P.isExpired(wishlist) ?
                         P.emptyState(P.t("board.emptyOwner"), h("a", { class: "btn primary", href: "/wishes/new?wishlist=" + encodeURIComponent(wishlist.id) }, P.icon("plus"), P.t("wish.add"))) :

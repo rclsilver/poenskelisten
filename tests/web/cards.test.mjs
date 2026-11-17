@@ -15,7 +15,7 @@ const links = (el) => el.querySelectorAll("a").map((a) => a.getAttribute("href")
 function wish(extra = {}) {
     return {
         id: "w1", name: "Lamp", note: "Terracotta", price: 79, url: "https://shop.example/lamp",
-        image: false, wish_claimable: true, wishclaim: [], updated_at: "2026-10-01T10:00:00Z",
+        image: false, wish_claimable: true, wishclaim: [], reservation: null, updated_at: "2026-10-01T10:00:00Z",
         currency: "€", currency_padding: true, currency_left: false,
         owner_id: { id: "owner" }, wishlist_owner: { id: "owner" }, collaborators: [],
         ...extra
@@ -47,8 +47,8 @@ test("the claimer can cancel, others see who claimed unless hidden", () => {
 
 test("owners and collaborators edit and delete, and see no claim", () => {
     const { P } = setup();
-    const card = P.wishCard(wish(), { mode: "manage", userID: "owner", showClaims: false, onDelete() {} });
-    assert.deepEqual(buttons(card), ["Delete “Lamp”"]);
+    const card = P.wishCard(wish(), { mode: "manage", userID: "owner", showClaims: false, onReserve() {}, onUnreserve() {}, onDelete() {} });
+    assert.deepEqual(buttons(card), ["Mark as reserved", "Delete “Lamp”"]);
     assert.ok(links(card).includes("/wishes/w1/edit"));
     assert.ok(!card.textContent.includes("Available"));
     assert.ok(!card.textContent.includes("I'll give it"));
@@ -63,6 +63,33 @@ test("public visitors see that a wish is taken, never by whom", () => {
     assert.deepEqual(buttons(card), []);
     const free = P.wishCard(wish(), { mode: "public", userID: "", showClaims: true, signInHref: "/login" });
     assert.ok(links(free).includes("/login"));
+});
+
+test("a reserved wish shows the Réservé badge on the public link", () => {
+    const { P } = setup();
+    const card = P.wishCard(wish({ wish_claimable: false, reservation: { reserved: true, note: "" } }), { mode: "public", userID: "", showClaims: true, signInHref: "/login" });
+    assert.ok(card.textContent.includes("Claimed"));
+    assert.ok(!card.textContent.includes("Internal note"));
+});
+
+test("the owner sees a clear-reservation control and the internal note", () => {
+    const { P } = setup();
+    const card = P.wishCard(wish({ reservation: { reserved: true, note: "aunt Claire" } }), { mode: "manage", userID: "owner", showClaims: false, onReserve() {}, onUnreserve() {}, onDelete() {} });
+    assert.ok(buttons(card).includes("Remove reservation"));
+    assert.ok(card.textContent.includes("aunt Claire"));
+});
+
+test("an unreserved wish in manage mode offers to reserve", () => {
+    const { P } = setup();
+    const card = P.wishCard(wish(), { mode: "manage", userID: "owner", showClaims: false, onReserve() {}, onUnreserve() {}, onDelete() {} });
+    assert.ok(buttons(card).includes("Mark as reserved"));
+});
+
+test("only one badge when a wish is both claimed and owner-reserved", () => {
+    const { P } = setup();
+    const both = wish({ wishclaim: [{ user: { id: "bob", first_name: "Bob" }, enabled: true }], reservation: { reserved: true, note: "" } });
+    const card = P.wishCard(both, { mode: "member", userID: "me", showClaims: true, onClaim() {}, onUnclaim() {} });
+    assert.equal(card.querySelectorAll(".badge").length, 1);
 });
 
 test("a wish link is only shown for http(s) URLs", () => {
