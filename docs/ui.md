@@ -29,8 +29,11 @@ A list's role for the current user is `owner`, `collaborator` or `group_member`.
 | Edit, replace or remove its image, delete | owner and collaborators of its list | `POST /api/auth/wishes/:id`, `DELETE /api/auth/wishes/:id` |
 | Claim and unclaim | group members of a claimable list, never the owner or a collaborator, one claimer per wish | `POST /api/auth/wishes/:id/claim`, `/unclaim` |
 | See who claimed | group members, unless the list hides claimers (the API then sends "Hidden User") | part of the wish |
+| Mark reserved, with an internal note | owner and collaborators, on any list | `POST /api/auth/wishes/:id/reservation`, `DELETE /api/auth/wishes/:id/reservation` |
 
-The API removes claims from what the owner and collaborators receive, so the surprise is kept by the server, not by the page. Where to put a new wish:
+The API removes claims from what the owner and collaborators receive, so the surprise is kept by the server, not by the page.
+
+The reservation mark is a separate concept from a claim: the owner and collaborators set it (for instance when a relative tells them off-site that they will bring a gift), and it is **not** bound by the claimable flag, so it works on a public list too. The wish shows a single "Réservé" badge — driven by the mark for everyone, and additionally by a surprise claim for group members and the public link (never for the owner side, which stays blind to claims). The optional note is internal: the API sends it only to the owner and collaborators, never to group members or the public link. The two concepts are independent, with no hard lock between them. Where to put a new wish:
 
 - from the home page with several eligible lists: the user must pick one, nothing is preselected;
 - with a single eligible list: it is used without asking;
