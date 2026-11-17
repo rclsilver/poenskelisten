@@ -49,6 +49,7 @@ func allControllersTestModels() []interface{} {
 		&models.WishCategory{},
 		&models.Wish{},
 		&models.WishClaim{},
+		&models.WishReservation{},
 		&models.News{},
 		&models.MFARecoveryCode{},
 		&models.Session{},
@@ -87,6 +88,9 @@ func setupControllersDB(t *testing.T, tables ...interface{}) {
 	if fullSchema {
 		if err := database.EnsureOneClaimPerWish(); err != nil {
 			t.Fatalf("failed to add the claim index: %v", err)
+		}
+		if err := database.EnsureOneReservationPerWish(); err != nil {
+			t.Fatalf("failed to add the reservation index: %v", err)
 		}
 	}
 }

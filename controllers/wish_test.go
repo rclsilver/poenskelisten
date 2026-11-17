@@ -2310,3 +2310,81 @@ func TestAPIGetWish_WishDisappearsMidRequest(t *testing.T) {
 		t.Errorf("error = %v, want %q", got, "Failed to find wish in the database.")
 	}
 }
+
+// --- Reservation mark on WishObject ---
+
+// TestConvertWishShowsReservationNoteOnlyToOwnerSide verifies that a live
+// reservation mark surfaces Reserved==true to every viewer (owner,
+// collaborator, group member, and the public/nil viewer), while its internal
+// Note reaches only the wishlist owner and its collaborators.
+func TestConvertWishShowsReservationNoteOnlyToOwnerSide(t *testing.T) {
+	setupControllersDB(t)
+	owner := createTestUser(t)
+	collaborator := createTestUser(t)
+	member := createTestUser(t)
+	wishlist := createTestWishlist(t, owner.ID)
+	addWishCollaborator(t, wishlist.ID, collaborator.ID)
+	group := createTestGroup(t, owner.ID)
+	addGroupMembership(t, group.ID, member.ID)
+	addWishlistMembership(t, wishlist.ID, group.ID)
+	wish := createTestWish(t, owner.ID, wishlist.ID)
+
+	if _, err := database.SetWishReservationInDB(wish.ID, owner.ID, "aunt Claire"); err != nil {
+		t.Fatalf("failed to set reservation: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		viewer   *uuid.UUID
+		wantNote string
+	}{
+		{"owner", &owner.ID, "aunt Claire"},
+		{"collaborator", &collaborator.ID, "aunt Claire"},
+		{"group member", &member.ID, ""},
+		{"public/nil", nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			obj, err := ConvertWishToWishObject(wish, c.viewer)
+			if err != nil {
+				t.Fatalf("ConvertWishToWishObject failed: %v", err)
+			}
+			if obj.Reservation == nil {
+				t.Fatalf("Reservation = nil, want a live mark")
+			}
+			if !obj.Reservation.Reserved {
+				t.Errorf("Reservation.Reserved = false, want true for every viewer")
+			}
+			if obj.Reservation.Note != c.wantNote {
+				t.Errorf("Reservation.Note = %q, want %q", obj.Reservation.Note, c.wantNote)
+			}
+		})
+	}
+}
+
+// TestConvertWishOwnerStillBlindToClaims is the secrecy regression guard: on a
+// claimable list a member's surprise claim stays hidden from the wishlist
+// owner, yet the owner still sees their own reservation mark.
+func TestConvertWishOwnerStillBlindToClaims(t *testing.T) {
+	setupControllersDB(t)
+	owner := createTestUser(t)
+	member := createTestUser(t)
+	wishlist := makeClaimable(t, createTestWishlist(t, owner.ID))
+	wish := createTestWish(t, owner.ID, wishlist.ID)
+	wishTestSeedClaim(t, wish.ID, member.ID)
+
+	if _, err := database.SetWishReservationInDB(wish.ID, owner.ID, "aunt Claire"); err != nil {
+		t.Fatalf("failed to set reservation: %v", err)
+	}
+
+	obj, err := ConvertWishToWishObject(wish, &owner.ID)
+	if err != nil {
+		t.Fatalf("ConvertWishToWishObject failed: %v", err)
+	}
+	if len(obj.WishClaim) != 0 {
+		t.Errorf("WishClaim = %v, want empty: the owner must stay blind to surprise claims", obj.WishClaim)
+	}
+	if obj.Reservation == nil || !obj.Reservation.Reserved {
+		t.Errorf("Reservation = %v, want Reserved==true: the owner sees their own mark", obj.Reservation)
+	}
+}

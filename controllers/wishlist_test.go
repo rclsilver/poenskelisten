@@ -2496,3 +2496,44 @@ func TestRemoveFromWishlistMembershipVanishes(t *testing.T) {
 		t.Errorf("error = %v", resp["error"])
 	}
 }
+
+// TestPublicWishlistShowsReservedWithoutNote confirms the public link exposes a
+// wish's reserved state but never its internal note, and still carries no
+// surprise claim.
+func TestPublicWishlistShowsReservedWithoutNote(t *testing.T) {
+	setupControllersDB(t)
+	owner := createTestUser(t)
+	wishlist := wishlistTestPublic(t, owner.ID)
+	wish := createTestWish(t, owner.ID, wishlist.ID)
+	if _, err := database.SetWishReservationInDB(wish.ID, owner.ID, "aunt Claire"); err != nil {
+		t.Fatalf("failed to set reservation: %v", err)
+	}
+
+	code, resp := wlDo(GetPublicWishlist, "GET", "/api/open/wishlists/public/"+wishlist.PublicHash.String(), "", "",
+		gin.Params{{Key: "wishlist_hash", Value: wishlist.PublicHash.String()}})
+	if code != 200 {
+		t.Fatalf("status = %d, want 200; body=%v", code, resp)
+	}
+	obj, _ := resp["wishlist"].(map[string]interface{})
+	wishes, _ := obj["wishes"].([]interface{})
+	if len(wishes) != 1 {
+		t.Fatalf("wishes = %v, want one", wishes)
+	}
+	wishMap, _ := wishes[0].(map[string]interface{})
+	reservation, ok := wishMap["reservation"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reservation = %v, want an object", wishMap["reservation"])
+	}
+	if reservation["reserved"] != true {
+		t.Errorf("reservation.reserved = %v, want true", reservation["reserved"])
+	}
+	if reservation["note"] != "" {
+		t.Errorf("reservation.note = %v, want empty on the public link", reservation["note"])
+	}
+	if claims, _ := wishMap["wishclaim"].([]interface{}); len(claims) != 0 {
+		t.Errorf("wishclaim = %v, want empty", claims)
+	}
+	if raw, _ := json.Marshal(resp); strings.Contains(string(raw), "aunt Claire") {
+		t.Errorf("the internal note leaked into the public response")
+	}
+}

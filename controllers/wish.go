@@ -183,6 +183,38 @@ func ConvertWishToWishObject(wish models.Wish, requestUserID *uuid.UUID) (models
 		}
 	}
 
+	// Load the owner/collaborator reservation mark, a concept separate from the
+	// surprise claim above. Reserved is surfaced to every viewer; the internal
+	// Note is kept only for the wishlist owner and its collaborators (keyed on
+	// the wishlist owner + collaborators, not wish.OwnerID) and blanked for
+	// everyone else, including the public/nil viewer. ReservedByUserID is never
+	// exposed: only the WishReservationObject leaves this function.
+	reservation, err := database.GetLiveWishReservation(wish.ID)
+	if err != nil {
+		logger.Log.Error("Failed to get wish reservation for wish '" + wish.ID.String() + "'. Returning. Error: " + err.Error())
+		return models.WishObject{}, err
+	}
+	if reservation != nil {
+		reservationObject := &models.WishReservationObject{Reserved: true, Note: reservation.Note}
+
+		ownerSide := false
+		if requestUserID != nil {
+			if wishlistOwnerUser.ID == *requestUserID {
+				ownerSide = true
+			}
+			for _, wishCollaborator := range wishlistCollabObjects {
+				if wishCollaborator.User.ID == *requestUserID {
+					ownerSide = true
+				}
+			}
+		}
+		if !ownerSide {
+			reservationObject.Note = ""
+		}
+
+		wishObject.Reservation = reservationObject
+	}
+
 	// With hidden claimers, others only learn that a wish is claimed: the
 	// claimer's ID would name them through the member list. The claimer keeps
 	// it, so they can tell the claim is theirs.

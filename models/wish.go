@@ -50,6 +50,7 @@ type WishObject struct {
 	Image           bool                         `json:"image"`
 	WishlistID      uuid.UUID                    `json:"wishlist_id"`
 	WishClaim       []WishClaimObject            `json:"wishclaim"`
+	Reservation     *WishReservationObject       `json:"reservation"`
 	WishClaimable   bool                         `json:"wish_claimable"`
 	Currency        string                       `json:"currency"`
 	CurrencyPadding bool                         `json:"currency_padding"`
