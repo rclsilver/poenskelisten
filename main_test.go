@@ -895,7 +895,7 @@ func TestInitRouterEscapesAppText(t *testing.T) {
 var routerTestModels = []interface{}{
 	&models.User{}, &models.Invite{}, &models.Group{}, &models.GroupMembership{},
 	&models.Wishlist{}, &models.WishlistMembership{}, &models.WishlistCollaborator{},
-	&models.WishCategory{}, &models.Wish{}, &models.WishClaim{}, &models.News{},
+	&models.WishCategory{}, &models.Wish{}, &models.WishClaim{}, &models.WishReservation{}, &models.News{},
 	&models.MFARecoveryCode{}, &models.Session{}, &models.OAuthClient{},
 	&models.AuthorizationCode{}, &models.OAuthConsent{},
 }

@@ -52,12 +52,16 @@ func setupMCPDB(t *testing.T) {
 		&models.User{}, &models.Wishlist{}, &models.Wish{},
 		&models.Group{}, &models.GroupMembership{},
 		&models.WishlistMembership{}, &models.WishlistCollaborator{}, &models.WishClaim{}, &models.WishCategory{},
+		&models.WishReservation{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	database.Instance = instance
 	if err := database.EnsureOneClaimPerWish(); err != nil {
 		t.Fatalf("failed to add the claim index: %v", err)
+	}
+	if err := database.EnsureOneReservationPerWish(); err != nil {
+		t.Fatalf("failed to add the reservation index: %v", err)
 	}
 }
 
