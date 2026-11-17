@@ -42,6 +42,7 @@ var boundRequestTypes = map[string]reflect.Type{
 	"models.UserUpdatePasswordRequest":           reflect.TypeOf(models.UserUpdatePasswordRequest{}),
 	"models.UserUpdateRequest":                   reflect.TypeOf(models.UserUpdateRequest{}),
 	"models.WishClaimCreationRequest":            reflect.TypeOf(models.WishClaimCreationRequest{}),
+	"models.WishReservationCreationRequest":      reflect.TypeOf(models.WishReservationCreationRequest{}),
 	"models.WishCreationRequest":                 reflect.TypeOf(models.WishCreationRequest{}),
 	"models.WishUpdateRequest":                   reflect.TypeOf(models.WishUpdateRequest{}),
 	"models.WishlistCollaboratorCreationRequest": reflect.TypeOf(models.WishlistCollaboratorCreationRequest{}),

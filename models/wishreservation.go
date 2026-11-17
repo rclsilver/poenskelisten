@@ -9,9 +9,9 @@ import "github.com/google/uuid"
 // mirror WishClaim; the table is wish_reservations.
 type WishReservation struct {
 	GormModel
-	WishID           uuid.UUID `json:"" gorm:"type:varchar(100);"`
+	WishID           uuid.UUID `json:"-" gorm:"type:varchar(100);"`
 	Wish             Wish      `json:"wish" gorm:"not null;"`
-	ReservedByUserID uuid.UUID `json:"" gorm:"type:varchar(100);"`
+	ReservedByUserID uuid.UUID `json:"-" gorm:"type:varchar(100);"`
 	ReservedByUser   User      `json:"reserved_by_user" gorm:"not null;"`
 	Note             string    `json:"note"`
 	Enabled          bool      `json:"enabled" gorm:"not null;default: true"`

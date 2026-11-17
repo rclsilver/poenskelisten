@@ -314,6 +314,8 @@ func initRouter(configFile models.ConfigStruct) *gin.Engine {
 			auth.DELETE("/wishes/:wish_id", controllers.DeleteWish)
 			auth.POST("/wishes/:wish_id/claim", controllers.RegisterWishClaim)
 			auth.POST("/wishes/:wish_id/unclaim", controllers.RemoveWishClaim)
+			auth.POST("/wishes/:wish_id/reservation", controllers.SetWishReservation)
+			auth.DELETE("/wishes/:wish_id/reservation", controllers.RemoveWishReservation)
 			auth.POST("/wishes/:wish_id", uploadLimit, largeBodies, controllers.APIUpdateWish)
 			auth.GET("/wishes/:wish_id", controllers.APIGetWish)
 
