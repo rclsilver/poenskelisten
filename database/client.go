@@ -134,6 +134,7 @@ func Migrate() {
 	errWishCategory := Instance.AutoMigrate(&models.WishCategory{})
 	errWish := Instance.AutoMigrate(&models.Wish{})
 	errWishClaim := Instance.AutoMigrate(&models.WishClaim{})
+	errWishReservation := Instance.AutoMigrate(&models.WishReservation{})
 	errNews := Instance.AutoMigrate(&models.News{})
 	errMFARecoveryCode := Instance.AutoMigrate(&models.MFARecoveryCode{})
 	errSession := Instance.AutoMigrate(&models.Session{})
@@ -141,7 +142,7 @@ func Migrate() {
 	errAuthorizationCode := Instance.AutoMigrate(&models.AuthorizationCode{})
 	errOAuthConsent := Instance.AutoMigrate(&models.OAuthConsent{})
 
-	err := errors.Join(errUser, errInvite, errGroup, errGroupMembership, errWishlist, errWishlistMembership, errWishlistCollaborator, errWishCategory, errWish, errWishClaim, errNews, errMFARecoveryCode, errSession, errOAuthClient, errAuthorizationCode, errOAuthConsent)
+	err := errors.Join(errUser, errInvite, errGroup, errGroupMembership, errWishlist, errWishlistMembership, errWishlistCollaborator, errWishCategory, errWish, errWishClaim, errWishReservation, errNews, errMFARecoveryCode, errSession, errOAuthClient, errAuthorizationCode, errOAuthConsent)
 	if err != nil {
 		panic(err)
 	}
@@ -158,6 +159,13 @@ func Migrate() {
 	// depends on it, so a failure is reported rather than stopping startup.
 	if err := EnsureOneClaimPerWish(); err != nil {
 		logger.Log.Error("failed to make the database refuse a second claim on a wish. error: " + err.Error())
+	}
+
+	// Same guard for the owner/collaborator reservation mark: without the index
+	// two marks sent at once can both be stored, so a failure is reported
+	// rather than stopping startup.
+	if err := EnsureOneReservationPerWish(); err != nil {
+		logger.Log.Error("failed to make the database refuse a second reservation on a wish. error: " + err.Error())
 	}
 
 	// Without it two claims sent at once can both be stored, but nothing else

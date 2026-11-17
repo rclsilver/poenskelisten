@@ -27,6 +27,7 @@ func allModels() []interface{} {
 		&models.WishCategory{},
 		&models.Wish{},
 		&models.WishClaim{},
+		&models.WishReservation{},
 		&models.News{},
 		&models.MFARecoveryCode{},
 		&models.Session{},
@@ -64,6 +65,9 @@ func setupTestDB(t *testing.T) {
 	Instance = instance
 	if err := EnsureOneClaimPerWish(); err != nil {
 		t.Fatalf("failed to add the claim index: %v", err)
+	}
+	if err := EnsureOneReservationPerWish(); err != nil {
+		t.Fatalf("failed to add the reservation index: %v", err)
 	}
 }
 
